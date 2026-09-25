@@ -20,6 +20,52 @@ CATALOGUED = "catalogued"
 VARIANT = "variant"
 UNVERIFIED = "unverified"
 
+# --------------------------------------------------------- controller range
+# The oldest vManage train the dashboard targets. Below this the endpoints it
+# uses predate the API shape it expects.
+VMANAGE_MIN = (20, 3)
+
+# The highest release the endpoint audit covers: Cisco's catalystwan SDK
+# declares constraints up to 20.16, and none of them touch the endpoints used
+# here. Anything above this is reported as newer than the audit, NOT as
+# unsupported — refusing to run against a release that did not exist when this
+# table was written would be a worse failure than running unverified.
+VMANAGE_VERIFIED_TO = (20, 16)
+
+
+def _parse(raw):
+    if not raw:
+        return None
+    parts = []
+    for piece in str(raw).split("."):
+        digits = "".join(ch for ch in piece if ch.isdigit())
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts) if parts else None
+
+
+def check_controller(raw_version: str | None) -> dict:
+    """Place this controller's release against the range the audit covers."""
+    version = _parse(raw_version)
+    fmt = lambda v: ".".join(str(n) for n in v)  # noqa: E731
+
+    if version is None:
+        status = "unknown"
+    elif version[:2] < VMANAGE_MIN:
+        status = "below_minimum"
+    elif version[:2] > VMANAGE_VERIFIED_TO:
+        status = "newer_than_verified"
+    else:
+        status = "within_audit"
+
+    return {
+        "version": raw_version,
+        "status": status,
+        "minimum": fmt(VMANAGE_MIN),
+        "verified_to": fmt(VMANAGE_VERIFIED_TO),
+    }
+
 # Ordered as an operator would read them: the foundation first.
 SOURCES = [
     {

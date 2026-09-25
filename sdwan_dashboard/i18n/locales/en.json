@@ -278,5 +278,18 @@
   "compat.ev.variant": "Variant",
   "compat.ev.unverified": "Unverified",
   "compat.note.per_device": "Cisco's SDK lists this path only with a deviceId parameter; the fabric-wide form used here is unconfirmed.",
-  "compat.disclaimer": "Only the last column is a fact about the controller in front of you — it records what the last poll received. The evidence column says how each endpoint was arrived at: Catalogued means the exact method and path appear in Cisco's own catalystwan SDK endpoint catalogue; Variant means that catalogue has the path only in another form, normally requiring a deviceId; Unverified means it came from the documented API and has never been validated against a live controller. Treat anything but Catalogued as needing confirmation on your own vManage."
+  "compat.disclaimer": "Only the last column is a fact about the controller in front of you — it records what the last poll received. The evidence column says how each endpoint was arrived at: Catalogued means the exact method and path appear in Cisco's own catalystwan SDK endpoint catalogue; Variant means that catalogue has the path only in another form, normally requiring a deviceId; Unverified means it came from the documented API and has never been validated against a live controller. Treat anything but Catalogued as needing confirmation on your own vManage.",
+  "compat.release": "Release",
+  "compat.rel.unknown": "Version not reported",
+  "compat.rel.below_minimum": "Older than targeted",
+  "compat.rel.within_audit": "Within the audited range",
+  "compat.rel.newer_than_verified": "Newer than the audit",
+  "compat.rel.range": "Targeted from {minimum}; endpoint audit covers up to {verified_to}.",
+  "compat.rel.newer_note": "This controller runs {version}, newer than the {verified_to} the audit reaches. Nothing here refuses to run — the source table below records what it actually served.",
+  "compat.rel.old_note": "This controller runs {version}, older than the {minimum} the dashboard targets. Expect endpoints to be missing or shaped differently.",
+  "eaar.basis.checked": "verified floor",
+  "eaar.basis.assumed": "assumed — release postdates the feature",
+  "eaar.basis.too_old": "below the floor",
+  "eaar.basis.unknown": "version not reported",
+  "eaar.assumed_note": "{count} edge(s) run {versions}, newer than the release table this check uses. They are taken as capable because the feature predates them, not because that release was verified."
 }

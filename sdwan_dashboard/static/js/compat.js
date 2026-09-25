@@ -14,10 +14,30 @@ const EVIDENCE_PILL = {
 async function loadCompat() {
   const d = await fetchJSON("/api/compat");
 
+  const rel = d.controller.release || {};
   document.getElementById("compat-version").textContent =
     d.controller.platform_version || t("compat.unknown_version");
-  document.getElementById("compat-tenancy").textContent =
-    d.controller.tenancy_mode || "—";
+
+  // A release newer than the audit is information, not a fault: the source
+  // table below is what says whether anything actually broke.
+  const RELEASE_COLOR = {
+    within_audit: GREEN, newer_than_verified: CISCO_BLUE,
+    below_minimum: ORANGE, unknown: DIM,
+  };
+  const verdict = document.getElementById("compat-tenancy");
+  verdict.textContent =
+    t("compat.rel." + (rel.status || "unknown")) +
+    (d.controller.tenancy_mode ? " · " + d.controller.tenancy_mode : "");
+  verdict.style.color = RELEASE_COLOR[rel.status] || DIM;
+
+  const note = document.getElementById("compat-range");
+  if (rel.status === "newer_than_verified") {
+    note.textContent = t("compat.rel.newer_note", rel);
+  } else if (rel.status === "below_minimum") {
+    note.textContent = t("compat.rel.old_note", rel);
+  } else {
+    note.textContent = t("compat.rel.range", rel);
+  }
 
   const served = document.getElementById("compat-served");
   served.textContent = `${d.counts.served}/${d.counts.total}`;

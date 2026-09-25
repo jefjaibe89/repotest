@@ -74,18 +74,49 @@ Both readers also accept a flattened row, because some builds return summary
 views of these lists and being strict would produce the same false alarm from
 the other direction.
 
-## Version floors
+## Versions
+
+### Controller range
+
+| | |
+|---|---|
+| Targeted from | 20.3 |
+| Endpoint audit reaches | 20.16 |
+| Above that | Runs, reported as newer than the audit |
+
+The audit ceiling is 20.16 because that is the highest release Cisco's
+catalystwan SDK declares a constraint for. A controller on a later train — 21,
+24, 26, anything — is **not** refused. It is labelled *newer than the audit* in
+the Compatibility view, and the source table there records what it actually
+served. Refusing to run against a release that postdates this table would be a
+worse failure than running unverified against it.
+
+### Feature floors
 
 | Feature | Floor | Basis |
 |---|---|---|
 | Enhanced AAR (IOS XE edges) | 17.9.1 | Cisco release notes; **not** verified here |
 | Enhanced AAR (controller train) | 20.9.1 | Cisco release notes; **not** verified here |
 
-The SDK carries `@versions` constraints on some endpoints (`>=20.4`, `>=20.6`,
-`>=20.9`, `>=20.13`, `>=20.16`), but none on the four endpoints this dashboard
-uses, so it gave no evidence either way for these floors. They are encoded in
-`analysis.ENHANCED_AAR_MIN` and should be confirmed against your own release
-notes before being relied on.
+None of the four catalogued endpoints carries a `@versions` constraint in the
+SDK, so it gave no evidence either way for these floors. Confirm them against
+your own release notes before relying on them.
+
+### Trains the floor table does not know
+
+A version table is written once and the software keeps shipping, so an
+unrecognised train must not be read as incapable. The rule:
+
+| Train | Verdict | Basis reported |
+|---|---|---|
+| 17.x, 20.x | Compared to the floor above | `checked` |
+| 18.x, 19.x | Never gained the feature | `too_old` |
+| Newer than 20.x | Taken as capable | `assumed` |
+
+An edge on 26.4.1 therefore reads as capable, and the AAR view says why: the
+feature predates that release, rather than that release having been verified.
+Before this rule existed, every device on a train past 20.x was reported as
+unable to run enhanced AAR — a false alarm across an entire modern fabric.
 
 ## How the dashboard behaves when a source is missing
 

@@ -398,6 +398,7 @@ def api_compat():
         "platform_version": live.get("platform_version"),
         "tenancy_mode": live.get("tenancy_mode"),
         "capabilities": live.get("capabilities") or [],
+        "release": compat.check_controller(live.get("platform_version")),
     }
     return jsonify(result)
 

@@ -281,6 +281,15 @@ ENHANCED_AAR_MIN = {
     20: (20, 9, 1),    # Catalyst SD-WAN controllers and vEdge
 }
 
+# The newest train with a floor recorded above. Anything on a higher train
+# postdates the feature, so it is assumed to carry it rather than reported as
+# incapable: this check must not mark a fabric as unable to do something its
+# software has shipped with for years, just because this table was written
+# before that release existed. Trains between the known ones (18.x, 19.x are
+# vEdge software predating the 20.x renumbering) never gained it and still
+# read as unsupported.
+NEWEST_KNOWN_TRAIN = max(ENHANCED_AAR_MIN)
+
 
 def parse_version(raw: str | None) -> tuple[int, ...] | None:
     """Turn "17.12.3" into (17, 12, 3). Returns None for anything unparseable."""
@@ -301,13 +310,34 @@ def supports_enhanced_aar(raw: str | None) -> tuple[bool, str | None]:
     if version is None:
         return False, None
 
-    floor = ENHANCED_AAR_MIN.get(version[0])
+    major = version[0]
+    floor = ENHANCED_AAR_MIN.get(major)
+
     if floor is None:
-        # A train with no known floor (18.x, 19.x) never gained the feature.
+        # Newer than every train we have a floor for: the feature predates it.
+        if major > NEWEST_KNOWN_TRAIN:
+            return True, None
+        # 18.x / 19.x and anything older never gained it.
         return False, None
 
     padded = version + (0,) * (len(floor) - len(version))
     return padded[:len(floor)] >= floor, ".".join(str(n) for n in floor)
+
+
+def version_status(raw: str | None) -> str:
+    """How the verdict on this release was reached, for honest reporting.
+
+    "assumed" matters: the dashboard says the release is capable because it
+    postdates the feature, not because anyone checked that release.
+    """
+    version = parse_version(raw)
+    if version is None:
+        return "unknown"
+
+    major = version[0]
+    if major in ENHANCED_AAR_MIN:
+        return "checked" if supports_enhanced_aar(raw)[0] else "too_old"
+    return "assumed" if major > NEWEST_KNOWN_TRAIN else "too_old"
 
 
 def analyse_enhanced_aar(
@@ -365,6 +395,9 @@ def analyse_enhanced_aar(
             "site_id": d.get("site-id"),
             "version": d.get("version"),
             "supported": ok,
+            # "assumed" when the release is newer than anything in the table:
+            # capable by date rather than by verification.
+            "basis": version_status(d.get("version")),
             "required": floor,
             "reachable": d.get("reachability") == "reachable",
         })

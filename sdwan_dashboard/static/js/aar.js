@@ -33,6 +33,7 @@ async function loadEnhancedAar() {
 
   renderEaarClasses(d.classes);
   renderEaarDevices(d.devices);
+  renderEaarAssumed(d.devices);
   renderEaarFindings(d.findings);
 }
 
@@ -73,6 +74,23 @@ function renderEaarDevices(devices) {
       ${esc(t("eaar.required"))} <b>${esc(d.required || "—")}</b>
     </span>
   </div>`).join("");
+}
+
+// Releases newer than the floor table are taken as capable. Say so, rather
+// than letting an assumption read as a verified result.
+function renderEaarAssumed(devices) {
+  const assumed = devices.filter(d => d.basis === "assumed");
+  const note = document.getElementById("eaar-assumed");
+  if (!note) return;
+  if (!assumed.length) {
+    note.hidden = true;
+    return;
+  }
+  note.hidden = false;
+  note.textContent = t("eaar.assumed_note", {
+    count: assumed.length,
+    versions: [...new Set(assumed.map(d => d.version))].join(", "),
+  });
 }
 
 function renderEaarFindings(findings) {

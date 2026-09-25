@@ -194,3 +194,93 @@ def test_compat_endpoint_reports_the_controller(client):
 def test_compat_is_translated(client):
     body = client.get("/compat?lang=es").get_data(as_text=True)
     assert "Compatibilidad con vManage" in body
+
+
+# ----------------------------------------------- forward compatibility
+# A version table is written at a point in time and the software keeps
+# shipping. Failing closed on an unrecognised train reports a modern fabric as
+# incapable of something its software has had for years.
+@pytest.mark.parametrize("version", [
+    "21.1.1", "22.4.1", "24.3.1", "26.1.1", "26.12.0", "27.2.0", "30.1.1",
+])
+def test_releases_newer_than_the_table_are_taken_as_capable(version):
+    supported, _ = analysis.supports_enhanced_aar(version)
+    assert supported is True, f"{version} must not read as incapable"
+    assert analysis.version_status(version) == "assumed"
+
+
+@pytest.mark.parametrize("version,expected", [
+    ("17.12.3", "checked"),    # known train, above its floor
+    ("17.6.5", "too_old"),     # known train, below its floor
+    ("20.12.1", "checked"),
+    ("20.6.1", "too_old"),
+    ("26.1.1", "assumed"),     # newer than any train with a floor
+    ("19.2.2", "too_old"),     # vEdge software predating the renumbering
+    ("18.4.1", "too_old"),
+    ("garbage", "unknown"),
+    (None, "unknown"),
+])
+def test_version_verdict_says_how_it_was_reached(version, expected):
+    assert analysis.version_status(version) == expected
+
+
+def test_an_assumed_release_is_not_reported_as_a_blocker():
+    out = analysis.analyse_enhanced_aar(
+        devices=[{"device-type": "vedge", "version": "26.1.1", "host-name": "modern"}],
+        sla_definitions=[_sla_def()], probe_classes=[_probe_def()],
+    )
+    assert out["totals"]["devices_blocking"] == 0
+    assert out["state"] == "enabled"
+    assert out["devices"][0]["basis"] == "assumed"
+
+
+def _probe_def():
+    return normalise_probe_class({
+        "name": "P", "listId": "p-uuid",
+        "entries": [{"forwardingClass": "voice", "map": [{"color": "mpls", "dscp": 46}]}],
+    })
+
+
+def _sla_def():
+    return normalise_sla_definition({
+        "name": "S", "listId": "s-uuid",
+        "entries": [{"latency": "50", "appProbeClass": "p-uuid"}],
+    })
+
+
+# ------------------------------------------------ controller release range
+@pytest.mark.parametrize("version,status", [
+    ("20.3.0", "within_audit"),
+    ("20.12.1", "within_audit"),
+    ("20.16.1", "within_audit"),
+    ("21.1.1", "newer_than_verified"),
+    ("26.1.1", "newer_than_verified"),
+    ("28.4.0", "newer_than_verified"),
+    ("20.1.0", "below_minimum"),
+    ("19.2.1", "below_minimum"),
+    (None, "unknown"),
+])
+def test_controller_release_is_placed_against_the_audit(version, status):
+    assert compat.check_controller(version)["status"] == status
+
+
+def test_a_newer_controller_is_information_not_a_failure():
+    """Refusing a release that postdates the table would be the worse bug."""
+    result = compat.check_controller("26.1.1")
+    assert result["status"] == "newer_than_verified"
+    assert result["verified_to"] == "20.16"
+    assert result["minimum"] == "20.3"
+
+
+def test_controller_check_survives_odd_version_strings():
+    for raw in ("", "20", "20.x", "v20.12", "20.12.1a"):
+        assert compat.check_controller(raw)["status"] in (
+            "unknown", "within_audit", "below_minimum", "newer_than_verified"
+        )
+
+
+def test_api_reports_the_release_verdict(client):
+    release = client.get("/api/compat").get_json()["controller"]["release"]
+    assert release["status"] in ("within_audit", "newer_than_verified",
+                                "below_minimum", "unknown")
+    assert release["verified_to"]
