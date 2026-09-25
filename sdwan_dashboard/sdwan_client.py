@@ -3,6 +3,7 @@ Cisco SD-WAN (Catalyst SD-WAN) vManage REST API client.
 Handles authentication, session management, and all health-check data retrieval.
 """
 
+import math
 import time
 from typing import Any
 
@@ -180,6 +181,28 @@ class SDWANClient:
         data = self._get("/device?deviceRole=cedge,vedge")
         return data.get("data", [])
 
+    # ------------------------------------------------- tunnels and drill-down
+    def get_tunnel_stats(self) -> list[dict]:
+        """Fabric-wide IPsec/TLOC tunnel state."""
+        data = self._get("/device/tunnel/statistics")
+        return data.get("data", [])
+
+    def get_device_tunnels(self, device_id: str) -> list[dict]:
+        data = self._get(f"/device/tunnel/statistics?deviceId={device_id}")
+        return data.get("data", [])
+
+    def get_device_interfaces(self, device_id: str) -> list[dict]:
+        data = self._get(f"/device/interface?deviceId={device_id}")
+        return data.get("data", [])
+
+    def get_device_control_connections(self, device_id: str) -> list[dict]:
+        data = self._get(f"/device/control/connections?deviceId={device_id}")
+        return data.get("data", [])
+
+    def get_device_omp_routes(self, device_id: str) -> list[dict]:
+        data = self._get(f"/device/omp/routes/received?deviceId={device_id}")
+        return data.get("data", [])
+
     def get_system_status(self, device_id: str) -> dict:
         data = self._get(f"/device/system/status?deviceId={device_id}")
         return data.get("data", [{}])[0]
@@ -191,9 +214,27 @@ class SDWANClient:
 
 # ------------------------------------------------- demo / mock data provider
 class MockSDWANClient:
-    """Returns realistic-looking static data for demo / development use."""
+    """Returns realistic-looking demo data, so the dashboard runs with no controller.
+
+    CPU and memory drift slowly around their baseline: a demo whose history
+    charts are perfectly flat lines looks broken rather than healthy.
+    """
+
+    def _drift(self, base: int, spread: int = 6, phase: float = 0.0) -> int:
+        """Nudge a baseline value with a smooth, deterministic wobble."""
+        wave = math.sin(time.time() / 90.0 + phase)
+        return max(1, min(99, int(round(base + wave * spread))))
 
     def get_device_list(self) -> list[dict]:
+        devices = self._base_devices()
+        for i, d in enumerate(devices):
+            if d.get("cpu-load") is not None:
+                d["cpu-load"] = self._drift(d["cpu-load"], phase=i)
+            if d.get("mem-util") is not None:
+                d["mem-util"] = self._drift(d["mem-util"], spread=4, phase=i + 0.5)
+        return devices
+
+    def _base_devices(self) -> list[dict]:
         return [
             {"system-ip": "1.1.1.1", "host-name": "vManage-1", "device-type": "vmanage",
              "reachability": "reachable", "status": "normal", "board-serial": "SN-001",
@@ -293,3 +334,69 @@ class MockSDWANClient:
 
     def get_reachability_summary(self) -> dict:
         return {"reachable": 9, "unreachable": 2}
+
+    # ------------------------------------------------- tunnels and drill-down
+    def get_tunnel_stats(self) -> list[dict]:
+        return [
+            {"system-ip": "10.0.1.1", "host-name": "cedge-BR1-MPLS", "local-color": "mpls",
+             "remote-color": "mpls", "remote-system-ip": "10.0.3.1", "state": "up",
+             "tunnel-protocol": "IPSEC", "latency": 12, "loss-percentage": 0.0, "jitter": 2},
+            {"system-ip": "10.0.1.1", "host-name": "cedge-BR1-MPLS", "local-color": "mpls",
+             "remote-color": "mpls", "remote-system-ip": "10.0.4.1", "state": "up",
+             "tunnel-protocol": "IPSEC", "latency": 18, "loss-percentage": 0.1, "jitter": 3},
+            {"system-ip": "10.0.1.2", "host-name": "cedge-BR1-INET", "local-color": "biz-internet",
+             "remote-color": "biz-internet", "remote-system-ip": "10.0.3.1", "state": "up",
+             "tunnel-protocol": "IPSEC", "latency": 34, "loss-percentage": 0.4, "jitter": 8},
+            {"system-ip": "10.0.1.2", "host-name": "cedge-BR1-INET", "local-color": "biz-internet",
+             "remote-color": "biz-internet", "remote-system-ip": "10.0.4.1", "state": "down",
+             "tunnel-protocol": "IPSEC", "latency": None, "loss-percentage": 100.0, "jitter": None},
+            {"system-ip": "10.0.2.1", "host-name": "cedge-BR2-MPLS", "local-color": "mpls",
+             "remote-color": "mpls", "remote-system-ip": "10.0.3.1", "state": "up",
+             "tunnel-protocol": "IPSEC", "latency": 15, "loss-percentage": 0.0, "jitter": 2},
+            {"system-ip": "10.0.3.1", "host-name": "cedge-HQ-1", "local-color": "mpls",
+             "remote-color": "mpls", "remote-system-ip": "10.0.4.1", "state": "up",
+             "tunnel-protocol": "IPSEC", "latency": 8, "loss-percentage": 0.0, "jitter": 1},
+            {"system-ip": "10.0.4.1", "host-name": "cedge-DC1-1", "local-color": "biz-internet",
+             "remote-color": "biz-internet", "remote-system-ip": "10.0.2.1", "state": "up",
+             "tunnel-protocol": "IPSEC", "latency": 41, "loss-percentage": 1.2, "jitter": 11},
+        ]
+
+    def get_device_tunnels(self, device_id: str) -> list[dict]:
+        return [t for t in self.get_tunnel_stats() if t["system-ip"] == device_id]
+
+    def get_device_interfaces(self, device_id: str) -> list[dict]:
+        catalogue = {
+            "10.0.1.1": [
+                {"ifname": "GigabitEthernet0/0/0", "if-oper-status": "Up", "if-admin-status": "Up",
+                 "ip-address": "172.16.1.1/30", "vpn-id": "0", "speed-mbps": "1000"},
+                {"ifname": "GigabitEthernet0/0/1", "if-oper-status": "Up", "if-admin-status": "Up",
+                 "ip-address": "10.1.1.1/24", "vpn-id": "10", "speed-mbps": "1000"},
+            ],
+            "10.0.1.2": [
+                {"ifname": "GigabitEthernet0/0/1", "if-oper-status": "Up", "if-admin-status": "Up",
+                 "ip-address": "203.0.113.5/30", "vpn-id": "0", "speed-mbps": "1000"},
+                {"ifname": "GigabitEthernet0/0/2", "if-oper-status": "Down", "if-admin-status": "Up",
+                 "ip-address": "10.1.2.1/24", "vpn-id": "10", "speed-mbps": "1000"},
+            ],
+        }
+        return catalogue.get(device_id, [
+            {"ifname": "GigabitEthernet0/0/0", "if-oper-status": "Up", "if-admin-status": "Up",
+             "ip-address": "172.16.9.1/30", "vpn-id": "0", "speed-mbps": "1000"},
+        ])
+
+    def get_device_control_connections(self, device_id: str) -> list[dict]:
+        return [
+            {"peer-type": "vsmart", "system-ip": "2.2.2.1", "local-color": "mpls",
+             "state": "up", "protocol": "dtls", "uptime": "12:04:33"},
+            {"peer-type": "vsmart", "system-ip": "2.2.2.2", "local-color": "mpls",
+             "state": "up", "protocol": "dtls", "uptime": "12:04:31"},
+            {"peer-type": "vmanage", "system-ip": "1.1.1.1", "local-color": "mpls",
+             "state": "up", "protocol": "dtls", "uptime": "12:04:35"},
+        ]
+
+    def get_device_omp_routes(self, device_id: str) -> list[dict]:
+        return [
+            {"vpn-id": "10", "prefix": "10.1.0.0/16", "from-peer": "2.2.2.1", "status": "C,I,R"},
+            {"vpn-id": "10", "prefix": "10.2.0.0/16", "from-peer": "2.2.2.1", "status": "C,I,R"},
+            {"vpn-id": "20", "prefix": "192.168.0.0/16", "from-peer": "2.2.2.2", "status": "C,I,R"},
+        ]

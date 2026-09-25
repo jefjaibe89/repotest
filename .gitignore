@@ -11,6 +11,12 @@ env/
 .coverage
 htmlcov/
 
+# Runtime state
+*.db
+*.db-wal
+*.db-shm
+*.lock
+
 node_modules/
 *.tgz
 

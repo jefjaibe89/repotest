@@ -1,5 +1,8 @@
 """
 Cisco Catalyst SD-WAN Health Check Dashboard — Flask backend
+
+Web requests never touch vManage: a background poller collects the fabric on a
+fixed cadence and writes it to the store, and every route serves from there.
 """
 
 import csv
@@ -8,19 +11,24 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
-from functools import wraps
 
-from flask import Flask, Response, jsonify, render_template
-
-import config
-import health
-from sdwan_client import (
-    MockSDWANClient,
-    SDWANAuthError,
-    SDWANClient,
-    SDWANConnectionError,
-    SDWANError,
+from flask import (
+    Flask,
+    Response,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
 )
+
+import auth
+import config
+import poller
+import store
+from sdwan_client import MockSDWANClient, SDWANClient, SDWANError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,15 +37,21 @@ logging.basicConfig(
 log = logging.getLogger("sdwan-dashboard")
 
 app = Flask(__name__)
+app.secret_key = config.SECRET_KEY
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=config.SESSION_COOKIE_SECURE,
+)
 
-# A logged-in vManage session is reused across requests. Re-authenticating on
-# every call costs an extra round trip per widget and vManage throttles logins.
+# A logged-in vManage session is reused across polls. Re-authenticating on every
+# poll costs a round trip and vManage throttles logins.
 _client_lock = threading.Lock()
 _cached_client: SDWANClient | None = None
 _cached_at: float = 0.0
 
 
-def _get_client():
+def get_client():
     """Return a ready-to-use client, reusing the vManage session when possible."""
     global _cached_client, _cached_at
 
@@ -63,63 +77,78 @@ def _get_client():
         return client
 
 
-def _invalidate_client():
+def invalidate_client():
     global _cached_client, _cached_at
     with _client_lock:
         _cached_client, _cached_at = None, 0.0
 
 
-def api_route(rule: str):
-    """Register a JSON endpoint that turns SD-WAN failures into clean 502s."""
+# --------------------------------------------------------------- data access
+def _latest() -> tuple[dict, dict]:
+    """Return (payload, meta). Raises LookupError when nothing has been collected."""
+    record = store.get_latest()
+    if record is None or not record["payload"]:
+        raise LookupError(record["error"] if record else "No data collected yet")
 
-    def decorator(fn):
-        @app.route(rule)
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            try:
-                return fn(*args, **kwargs)
-            except SDWANAuthError as exc:
-                # The cached session is no good any more; the next call re-logs in.
-                _invalidate_client()
-                log.warning("vManage auth failure on %s: %s", rule, exc)
-                return jsonify({"error": "auth", "message": str(exc)}), 502
-            except SDWANConnectionError as exc:
-                log.warning("vManage unreachable on %s: %s", rule, exc)
-                return jsonify({"error": "connection", "message": str(exc)}), 502
-            except SDWANError as exc:
-                log.exception("SD-WAN error on %s", rule)
-                return jsonify({"error": "sdwan", "message": str(exc)}), 502
-
-        return wrapper
-
-    return decorator
-
-
-def _normalize_device(d: dict) -> dict:
-    return {
-        "system_ip": d.get("system-ip"),
-        "hostname": d.get("host-name"),
-        "device_type": d.get("device-type"),
-        "model": d.get("device-model", "—"),
-        "version": d.get("version", "—"),
-        "site_id": d.get("site-id", "—"),
-        "reachability": d.get("reachability", "unknown"),
-        "status": d.get("status", "unknown"),
-        "cpu": d.get("cpu-load"),
-        "memory": d.get("mem-util"),
-        "serial": d.get("board-serial", "—"),
-        "uptime_ms": d.get("uptime-date"),
+    age = time.time() - record["fetched_at"]
+    meta = {
+        "fetched_at": record["fetched_at"],
+        "age_seconds": round(age, 1),
+        "error": record["error"],
+        "consecutive_failures": record["consecutive_failures"],
+        # Data is stale once it is older than two polling cycles.
+        "stale": bool(record["error"]) or age > config.POLL_INTERVAL_SECONDS * 2,
     }
+    return record["payload"], meta
 
 
-# ------------------------------------------------------------------ UI route
+def served(section: str):
+    """Serve one section of the latest payload, or 503 when there is nothing yet."""
+    try:
+        payload, meta = _latest()
+    except LookupError as exc:
+        return jsonify({"error": "no_data", "message": str(exc)}), 503
+
+    resp = jsonify(payload.get(section))
+    resp.headers["X-Data-Age"] = str(meta["age_seconds"])
+    resp.headers["X-Data-Stale"] = "1" if meta["stale"] else "0"
+    return resp
+
+
+# ------------------------------------------------------------------ UI routes
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not auth.enabled():
+        return redirect(url_for("index"))
+
+    if request.method == "POST":
+        if auth.check_credentials(request.form.get("username"), request.form.get("password")):
+            session["authenticated"] = True
+            session.permanent = False
+            target = request.args.get("next")
+            # Only follow relative paths, so the parameter cannot redirect off-site.
+            return redirect(target if target and target.startswith("/") else url_for("index"))
+        flash("Invalid credentials")
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login") if auth.enabled() else url_for("index"))
+
+
 @app.route("/")
+@auth.login_required
 def index():
     return render_template(
         "index.html",
         refresh_interval=config.REFRESH_INTERVAL_SECONDS,
         mode=config.MODE,
         vmanage_host=config.VMANAGE_HOST,
+        auth_enabled=auth.enabled(),
+        alerts_enabled=config.ALERTS_ENABLED,
     )
 
 
@@ -129,109 +158,134 @@ def healthz():
     return jsonify({"status": "ok", "mode": config.MODE})
 
 
-# ----------------------------------------------------------- API: summary
-@api_route("/api/summary")
-def api_summary():
-    client = _get_client()
-    devices = client.get_device_list()
-    counters = client.get_device_counters()
-    alarms = client.get_alarms(config.ALARM_WINDOW_HOURS)
-    bfd = client.get_bfd_sessions()
-    omp = client.get_omp_peers()
-
-    total_bfd_up = sum(d.get("bfd-sessions-up", 0) for d in bfd)
-    total_bfd_down = sum(d.get("bfd-sessions-down", 0) for d in bfd)
-    omp_up = sum(1 for d in omp if d.get("oper-state") == "up")
-
-    open_alarms = [a for a in alarms if not a.get("acknowledged")]
-    by_severity = {sev: 0 for sev in ("Critical", "Major", "Minor")}
-    for a in open_alarms:
-        sev = a.get("severity")
-        if sev in by_severity:
-            by_severity[sev] += 1
-
-    unreachable = counters.get(
-        "unreachableCount",
-        sum(1 for d in devices if d.get("reachability") != "reachable"),
-    )
-
+# ------------------------------------------------------------ poll metadata
+@app.route("/api/status")
+@auth.login_required
+def api_status():
+    record = store.get_latest()
+    if record is None:
+        return jsonify({"has_data": False, "stale": True, "error": "No data collected yet"})
+    age = time.time() - record["fetched_at"]
     return jsonify({
-        "total_devices": counters.get("totalCount", len(devices)),
-        "reachable": counters.get(
-            "reachableCount",
-            sum(1 for d in devices if d.get("reachability") == "reachable"),
-        ),
-        "unreachable": unreachable,
-        "bfd_up": total_bfd_up,
-        "bfd_down": total_bfd_down,
-        "omp_up": omp_up,
-        "omp_total": len(omp),
-        "alarms_critical": by_severity["Critical"],
-        "alarms_major": by_severity["Major"],
-        "alarms_minor": by_severity["Minor"],
+        "has_data": bool(record["payload"]),
+        "fetched_at": record["fetched_at"],
+        "age_seconds": round(age, 1),
+        "error": record["error"],
+        "consecutive_failures": record["consecutive_failures"],
+        "stale": bool(record["error"]) or age > config.POLL_INTERVAL_SECONDS * 2,
+        "poll_interval": config.POLL_INTERVAL_SECONDS,
     })
 
 
-# ------------------------------------------------------- API: health score
-@api_route("/api/health")
+# ----------------------------------------------------------- panel endpoints
+@app.route("/api/summary")
+@auth.login_required
+def api_summary():
+    return served("summary")
+
+
+@app.route("/api/health")
+@auth.login_required
 def api_health():
-    client = _get_client()
-    report = health.compute(
-        devices=client.get_device_list(),
-        bfd=client.get_bfd_sessions(),
-        control=client.get_control_status(),
-        alarms=client.get_alarms(config.ALARM_WINDOW_HOURS),
-    )
-    report["generated_at"] = datetime.now(timezone.utc).isoformat()
-    return jsonify(report)
+    return served("health")
 
 
-# ----------------------------------------------------------- API: devices
-@api_route("/api/devices")
+@app.route("/api/devices")
+@auth.login_required
 def api_devices():
-    client = _get_client()
-    return jsonify([_normalize_device(d) for d in client.get_device_list()])
+    return served("devices")
 
 
-# ----------------------------------------------------------- API: alarms
-@api_route("/api/alarms")
+@app.route("/api/alarms")
+@auth.login_required
 def api_alarms():
-    client = _get_client()
-    return jsonify(client.get_alarms(config.ALARM_WINDOW_HOURS))
+    return served("alarms")
 
 
-# ----------------------------------------------------------- API: bfd
-@api_route("/api/bfd")
+@app.route("/api/bfd")
+@auth.login_required
 def api_bfd():
-    return jsonify(_get_client().get_bfd_sessions())
+    return served("bfd")
 
 
-# ----------------------------------------------------------- API: omp
-@api_route("/api/omp")
+@app.route("/api/omp")
+@auth.login_required
 def api_omp():
-    return jsonify(_get_client().get_omp_peers())
+    return served("omp")
 
 
-# ----------------------------------------------- API: interface stats
-@api_route("/api/interfaces")
+@app.route("/api/interfaces")
+@auth.login_required
 def api_interfaces():
-    return jsonify(_get_client().get_interface_stats())
+    return served("interfaces")
 
 
-# ----------------------------------------------- API: control plane
-@api_route("/api/control")
+@app.route("/api/control")
+@auth.login_required
 def api_control():
-    return jsonify(_get_client().get_control_status())
+    return served("control")
+
+
+@app.route("/api/tunnels")
+@auth.login_required
+def api_tunnels():
+    return served("tunnels")
+
+
+# ------------------------------------------------------------------- history
+@app.route("/api/history")
+@auth.login_required
+def api_history():
+    hours = request.args.get("hours", config.HISTORY_WINDOW_HOURS, type=int)
+    return jsonify(store.get_history(hours=max(1, min(hours, 720))))
+
+
+# -------------------------------------------------------------- drill-down
+@app.route("/api/device/<system_ip>")
+@auth.login_required
+def api_device_detail(system_ip):
+    try:
+        payload, _ = _latest()
+    except LookupError as exc:
+        return jsonify({"error": "no_data", "message": str(exc)}), 503
+
+    device = next(
+        (d for d in payload.get("devices", []) if d.get("system_ip") == system_ip), None
+    )
+    if device is None:
+        return jsonify({"error": "not_found", "message": f"No device with system IP {system_ip}"}), 404
+
+    # The per-device views are not part of the polled payload: they are only
+    # needed when someone actually opens a device, so they are fetched on demand.
+    try:
+        client = get_client()
+        detail = {
+            "device": device,
+            "interfaces": client.get_device_interfaces(system_ip),
+            "tunnels": client.get_device_tunnels(system_ip),
+            "control_connections": client.get_device_control_connections(system_ip),
+            "omp_routes": client.get_device_omp_routes(system_ip),
+        }
+    except SDWANError as exc:
+        invalidate_client()
+        return jsonify({"error": "sdwan", "message": str(exc)}), 502
+
+    detail["alarms"] = [
+        a for a in payload.get("alarms", [])
+        if device.get("hostname") and device["hostname"] in str(a.get("message", ""))
+    ]
+    detail["history"] = store.get_device_history(system_ip, hours=config.HISTORY_WINDOW_HOURS)
+    return jsonify(detail)
 
 
 # --------------------------------------------------- Export: devices as CSV
 @app.route("/api/export/devices.csv")
+@auth.login_required
 def export_devices_csv():
     try:
-        devices = [_normalize_device(d) for d in _get_client().get_device_list()]
-    except SDWANError as exc:
-        _invalidate_client()
-        return jsonify({"error": "sdwan", "message": str(exc)}), 502
+        payload, _ = _latest()
+    except LookupError as exc:
+        return jsonify({"error": "no_data", "message": str(exc)}), 503
 
     columns = [
         "hostname", "system_ip", "device_type", "model", "version",
@@ -240,16 +294,27 @@ def export_devices_csv():
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
-    writer.writerows(devices)
+    writer.writerows(payload.get("devices", []))
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     return Response(
         buf.getvalue(),
         mimetype="text/csv",
-        headers={
-            "Content-Disposition": f'attachment; filename="sdwan-devices-{stamp}.csv"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="sdwan-devices-{stamp}.csv"'},
     )
+
+
+# ------------------------------------------------------------------ bootstrap
+def bootstrap():
+    """Prepare the store and start polling. Safe to call from every worker."""
+    store.init()
+    auth.warn_if_unprotected()
+    if config.ALERTS_ENABLED:
+        log.info("Alerting enabled (%s webhook)", config.ALERT_WEBHOOK_FORMAT)
+    poller.start(get_client)
+
+
+bootstrap()
 
 
 if __name__ == "__main__":
@@ -259,4 +324,6 @@ if __name__ == "__main__":
         host=config.FLASK_HOST,
         port=config.FLASK_PORT,
         debug=config.FLASK_DEBUG,
+        # The reloader would fork a second poller.
+        use_reloader=False,
     )

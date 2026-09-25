@@ -33,8 +33,14 @@
     {% if mode == 'live' %}
     <span class="meta-host">vManage: {{ vmanage_host }}</span>
     {% endif %}
+    {% if alerts_enabled %}
+    <span class="meta-refresh" title="Webhook alerting is active">🔔 Alerts on</span>
+    {% endif %}
     <span class="meta-refresh">Auto-refresh: <strong>{{ refresh_interval }}s</strong></span>
     <span id="last-update" class="meta-refresh">—</span>
+    {% if auth_enabled %}
+    <a href="{{ url_for('logout') }}" class="logout-link">Sign out</a>
+    {% endif %}
   </div>
 </header>
 
@@ -162,6 +168,25 @@
     </div>
   </section>
 
+  <!-- ---- Health trend over time ---- -->
+  <section class="chart-card">
+    <div class="card-header-inline">
+      <h3 class="chart-title">Health Trend</h3>
+      <div class="range-picker" id="range-picker">
+        <button class="range-btn active" data-hours="1">1h</button>
+        <button class="range-btn" data-hours="6">6h</button>
+        <button class="range-btn" data-hours="24">24h</button>
+        <button class="range-btn" data-hours="168">7d</button>
+      </div>
+    </div>
+    <div class="chart-wrap chart-wrap-trend">
+      <canvas id="chartTrend"></canvas>
+    </div>
+    <p id="trend-empty" class="trend-empty" hidden>
+      Collecting history — the trend appears after a few polling cycles.
+    </p>
+  </section>
+
   <!-- ---- Device Table + Control Plane ---- -->
   <section class="bottom-row">
 
@@ -219,7 +244,50 @@
     </div>
   </section>
 
+  <!-- ---- IPsec / TLOC tunnels ---- -->
+  <section class="table-card">
+    <div class="card-header">
+      <h3>IPsec Tunnels &amp; TLOC Paths</h3>
+      <span id="tunnel-summary" class="tunnel-summary">—</span>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Local Color</th>
+            <th>Remote</th>
+            <th>Remote Color</th>
+            <th>State</th>
+            <th>Latency</th>
+            <th>Loss</th>
+            <th>Jitter</th>
+          </tr>
+        </thead>
+        <tbody id="tunnel-tbody">
+          <tr><td colspan="8" class="loading-cell">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
 </main>
+
+<!-- ===== DEVICE DRILL-DOWN MODAL ===== -->
+<div id="device-modal" class="modal-backdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-header">
+      <div>
+        <h2 id="modal-title" class="modal-title">—</h2>
+        <p id="modal-subtitle" class="modal-subtitle">—</p>
+      </div>
+      <button id="modal-close" class="modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div id="modal-body" class="modal-body">
+      <p class="loading-cell">Loading…</p>
+    </div>
+  </div>
+</div>
 
 <footer class="page-footer">
   Cisco Catalyst SD-WAN Health Dashboard &mdash; powered by vManage REST API &nbsp;|&nbsp;

@@ -9,6 +9,8 @@ let chartReachability = null;
 let chartBfd = null;
 let chartThroughput = null;
 let chartHealthScore = null;
+let chartTrend = null;
+let trendHours = 1;
 
 // Consecutive failed refreshes. The banner only appears once a refresh has
 // actually failed, so a single blip during a controller failover is not
@@ -159,6 +161,134 @@ function renderFindings(findings) {
   }).join("");
 }
 
+// ---------------------------------------------------------------- Health trend
+async function loadTrend() {
+  const rows = await fetchJSON(`/api/history?hours=${trendHours}`);
+  const empty = document.getElementById("trend-empty");
+
+  // A single sample cannot be drawn as a line; say so rather than show a blank box.
+  if (rows.length < 2) {
+    empty.hidden = false;
+    document.getElementById("chartTrend").style.opacity = "0.15";
+    return;
+  }
+  empty.hidden = true;
+  document.getElementById("chartTrend").style.opacity = "1";
+
+  // Over a multi-day window a bare clock time cannot distinguish Monday 09:00
+  // from Thursday 09:00, so longer ranges carry the date too.
+  const labels = rows.map(r => {
+    const d = new Date(r.ts * 1000);
+    if (trendHours > 24) {
+      return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit" });
+    }
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  });
+
+  const ctx = document.getElementById("chartTrend").getContext("2d");
+  const data = {
+    labels,
+    datasets: [
+      {
+        label: "Health score",
+        data: rows.map(r => r.score),
+        borderColor: CISCO_BLUE,
+        backgroundColor: "rgba(0,188,235,.12)",
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0,
+        borderWidth: 2,
+        yAxisID: "y",
+      },
+      {
+        label: "Devices down",
+        data: rows.map(r => r.unreachable),
+        borderColor: RED,
+        backgroundColor: "transparent",
+        tension: 0.3,
+        pointRadius: 0,
+        borderWidth: 1.5,
+        borderDash: [4, 3],
+        yAxisID: "y1",
+      },
+    ],
+  };
+
+  if (chartTrend) {
+    chartTrend.data = data;
+    chartTrend.update();
+    return;
+  }
+
+  chartTrend = new Chart(ctx, {
+    type: "line",
+    data,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { position: "top", align: "end", labels: { boxWidth: 12, padding: 14 } } },
+      scales: {
+        x: { grid: { color: "#253D57" }, ticks: { maxTicksLimit: 10, font: { size: 10 } } },
+        y: { min: 0, max: 100, grid: { color: "#253D57" }, title: { display: true, text: "Score" } },
+        y1: {
+          position: "right",
+          beginAtZero: true,
+          grid: { drawOnChartArea: false },
+          ticks: { precision: 0 },
+          title: { display: true, text: "Down" },
+        },
+      },
+    },
+  });
+}
+
+document.getElementById("range-picker").addEventListener("click", e => {
+  const btn = e.target.closest(".range-btn");
+  if (!btn) return;
+  document.querySelectorAll(".range-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  trendHours = Number(btn.dataset.hours);
+  loadTrend().catch(err => console.error("Trend load failed:", err));
+});
+
+// ---------------------------------------------------------------- Tunnels
+async function loadTunnels() {
+  const tunnels = await fetchJSON("/api/tunnels");
+  const tbody = document.getElementById("tunnel-tbody");
+
+  const up = tunnels.filter(t => t.state === "up").length;
+  document.getElementById("tunnel-summary").textContent =
+    `${up} up · ${tunnels.length - up} down · ${tunnels.length} total`;
+
+  if (!tunnels.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="loading-cell">No tunnels reported.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = tunnels.map(t => {
+    const stateCls = t.state === "up" ? "state-up" : "state-down";
+    const loss = t["loss-percentage"];
+    const lossColor = loss === null || loss === undefined ? ""
+                    : loss >= 5 ? RED : loss >= 1 ? ORANGE : GREEN;
+    return `<tr>
+      <td style="font-weight:600">${esc(t["host-name"])}</td>
+      <td><span class="color-chip">${esc(t["local-color"])}</span></td>
+      <td style="font-family:monospace;color:#7A9BBF">${esc(t["remote-system-ip"])}</td>
+      <td><span class="color-chip">${esc(t["remote-color"])}</span></td>
+      <td><span class="${stateCls}">● ${esc(t.state)}</span></td>
+      <td>${num(t.latency, " ms")}</td>
+      <td style="color:${lossColor}">${num(loss, "%")}</td>
+      <td>${num(t.jitter, " ms")}</td>
+    </tr>`;
+  }).join("");
+}
+
+function num(value, suffix = "") {
+  if (value === null || value === undefined) return `<span style="color:#7A9BBF">—</span>`;
+  return `${value}${suffix}`;
+}
+
 // ---------------------------------------------------------------- Device Table
 async function loadDevices() {
   const devices = await fetchJSON("/api/devices");
@@ -188,7 +318,10 @@ function renderDeviceTable(devices) {
     const cpuHtml  = barHtml(d.cpu);
     const memHtml  = barHtml(d.memory);
 
-    return `<tr data-search="${(d.hostname + d.system_ip).toLowerCase()}">
+    return `<tr class="clickable-row"
+                data-search="${(d.hostname + d.system_ip).toLowerCase()}"
+                data-system-ip="${esc(d.system_ip)}"
+                data-hostname="${esc(d.hostname)}">
       <td style="font-weight:600">${esc(d.hostname)}</td>
       <td style="font-family:monospace;color:#7A9BBF">${esc(d.system_ip)}</td>
       <td><span class="type-chip ${typeClass}">${esc(d.device_type)}</span></td>
@@ -389,6 +522,118 @@ function updateThroughputChart(interfaces) {
   });
 }
 
+// ---------------------------------------------------------------- Device modal
+const modal = document.getElementById("device-modal");
+
+function openModal(systemIp, hostname) {
+  document.getElementById("modal-title").textContent = hostname || systemIp;
+  document.getElementById("modal-subtitle").textContent = systemIp;
+  document.getElementById("modal-body").innerHTML = `<p class="loading-cell">Loading…</p>`;
+  modal.hidden = false;
+  document.body.style.overflow = "hidden";
+
+  fetchJSON(`/api/device/${encodeURIComponent(systemIp)}`)
+    .then(renderModal)
+    .catch(err => {
+      document.getElementById("modal-body").innerHTML =
+        `<div class="login-error">${esc(err.message)}</div>`;
+    });
+}
+
+function closeModal() {
+  modal.hidden = true;
+  document.body.style.overflow = "";
+}
+
+document.getElementById("modal-close").addEventListener("click", closeModal);
+modal.addEventListener("click", e => { if (e.target === modal) closeModal(); });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !modal.hidden) closeModal();
+});
+
+function renderModal(d) {
+  const dev = d.device;
+  const fields = [
+    ["Type", dev.device_type], ["Model", dev.model], ["Version", dev.version],
+    ["Site", dev.site_id], ["Serial", dev.serial], ["Status", dev.reachability],
+    ["CPU", dev.cpu === null ? "—" : dev.cpu + "%"],
+    ["Memory", dev.memory === null ? "—" : dev.memory + "%"],
+  ];
+
+  document.getElementById("modal-body").innerHTML = `
+    <div class="modal-section">
+      <p class="modal-section-title">Overview</p>
+      <div class="modal-grid">
+        ${fields.map(([k, v]) => `<div>
+          <div class="modal-field-label">${esc(k)}</div>
+          <div class="modal-field-value">${esc(v)}</div>
+        </div>`).join("")}
+      </div>
+    </div>
+
+    ${section("Interfaces", d.interfaces,
+      ["Interface", "Admin", "Oper", "IP Address", "VPN", "Speed"],
+      i => [
+        i.ifname,
+        i["if-admin-status"],
+        stateSpan(i["if-oper-status"]),
+        i["ip-address"],
+        i["vpn-id"],
+        i["speed-mbps"] ? i["speed-mbps"] + " Mbps" : "—",
+      ])}
+
+    ${section("IPsec Tunnels", d.tunnels,
+      ["Remote", "Local Color", "Remote Color", "State", "Latency", "Loss"],
+      t => [
+        t["remote-system-ip"],
+        t["local-color"],
+        t["remote-color"],
+        stateSpan(t.state),
+        t.latency === null ? "—" : t.latency + " ms",
+        t["loss-percentage"] === null ? "—" : t["loss-percentage"] + "%",
+      ])}
+
+    ${section("Control Connections", d.control_connections,
+      ["Peer Type", "System IP", "Color", "Protocol", "State", "Uptime"],
+      c => [
+        c["peer-type"], c["system-ip"], c["local-color"],
+        c.protocol, stateSpan(c.state), c.uptime,
+      ])}
+
+    ${section("OMP Routes Received", d.omp_routes,
+      ["VPN", "Prefix", "From Peer", "Status"],
+      r => [r["vpn-id"], r.prefix, r["from-peer"], r.status])}
+  `;
+}
+
+function stateSpan(state) {
+  const isUp = String(state).toLowerCase() === "up";
+  return `<span class="${isUp ? "state-up" : "state-down"}">● ${esc(state)}</span>`;
+}
+
+function section(title, rows, headers, mapRow) {
+  const body = !rows || !rows.length
+    ? `<p class="modal-empty">Nothing reported.</p>`
+    : `<table class="mini-table">
+         <thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+         <tbody>${rows.map(r => `<tr>${mapRow(r).map(cellHtml).join("")}</tr>`).join("")}</tbody>
+       </table>`;
+  return `<div class="modal-section">
+    <p class="modal-section-title">${esc(title)}</p>${body}
+  </div>`;
+}
+
+// stateSpan already returns markup, so only plain values are escaped here.
+function cellHtml(value) {
+  const isMarkup = typeof value === "string" && value.startsWith("<span");
+  return `<td>${isMarkup ? value : esc(value)}</td>`;
+}
+
+document.getElementById("device-tbody").addEventListener("click", e => {
+  const row = e.target.closest("tr[data-system-ip]");
+  if (row) openModal(row.dataset.systemIp, row.dataset.hostname);
+});
+
 // ---------------------------------------------------------------- Search filter
 document.getElementById("device-search").addEventListener("input", function () {
   const q = this.value.toLowerCase();
@@ -398,9 +643,11 @@ document.getElementById("device-search").addEventListener("input", function () {
 });
 
 // ---------------------------------------------------------------- Timestamp
-function setLastUpdate() {
+function setLastUpdate(fetchedAt) {
+  // Show when the data was collected, not when the browser drew it.
+  const when = fetchedAt ? new Date(fetchedAt * 1000) : new Date();
   const el = document.getElementById("last-update");
-  el.textContent = "Updated: " + new Date().toLocaleTimeString();
+  el.textContent = "Updated: " + when.toLocaleTimeString();
   el.style.color = "";
 }
 
@@ -416,7 +663,7 @@ function esc(str) {
 
 // ---------------------------------------------------------------- Full refresh
 async function refreshAll() {
-  // allSettled, not all: one dead panel must not blank out the other four.
+  // allSettled, not all: one dead panel must not blank out the others.
   const results = await Promise.allSettled([
     loadHealth(),
     loadSummary(),
@@ -424,14 +671,18 @@ async function refreshAll() {
     loadAlarms(),
     loadControl(),
     loadInterfaces(),
+    loadTunnels(),
+    loadTrend(),
   ]);
 
   const failures = results.filter(r => r.status === "rejected");
 
   if (failures.length === 0) {
     consecutiveFailures = 0;
-    hideError();
-    setLastUpdate();
+    // Data now comes from the poller, so a successful fetch only proves the web
+    // tier is alive. The poller can be failing behind it, serving the last good
+    // payload — /api/status is what says whether the figures are current.
+    await reportPollerHealth();
     return;
   }
 
@@ -442,6 +693,31 @@ async function refreshAll() {
   // Some panels may have loaded; say when the data on screen was last good.
   if (failures.length < results.length) setLastUpdate();
   else markStale();
+}
+
+async function reportPollerHealth() {
+  let status;
+  try {
+    status = await fetchJSON("/api/status");
+  } catch (_) {
+    setLastUpdate();  // Can't tell; the panels loaded, so don't cry wolf.
+    return;
+  }
+
+  if (status.stale || status.error) {
+    const when = status.fetched_at
+      ? new Date(status.fetched_at * 1000).toLocaleTimeString()
+      : "never";
+    document.getElementById("last-update").textContent = `Stale — last good ${when}`;
+    document.getElementById("last-update").style.color = "#FF9A3C";
+    showError(
+      status.error ||
+      `Poller has not refreshed in ${Math.round(status.age_seconds)}s`
+    );
+  } else {
+    hideError();
+    setLastUpdate(status.fetched_at);
+  }
 }
 
 function markStale() {

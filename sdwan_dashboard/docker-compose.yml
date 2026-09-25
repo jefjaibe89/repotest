@@ -4,6 +4,9 @@ services:
     container_name: sdwan-health-dashboard
     ports:
       - "5000:5000"
+    volumes:
+      # Keeps the history database across container rebuilds.
+      - sdwan-data:/data
     environment:
       # Defaults to demo data. Set SDWAN_MODE=live plus the vManage
       # variables below (or supply them via a .env file) to go live.
@@ -13,5 +16,21 @@ services:
       VMANAGE_USER: "${VMANAGE_USER:-}"
       VMANAGE_PASS: "${VMANAGE_PASS:-}"
       VMANAGE_VERIFY_SSL: "${VMANAGE_VERIFY_SSL:-false}"
+
       REFRESH_INTERVAL_SECONDS: "${REFRESH_INTERVAL_SECONDS:-30}"
+      POLL_INTERVAL_SECONDS: "${POLL_INTERVAL_SECONDS:-30}"
+      HISTORY_RETENTION_DAYS: "${HISTORY_RETENTION_DAYS:-7}"
+
+      # Leave empty to run without a login (demo only).
+      DASHBOARD_USER: "${DASHBOARD_USER:-admin}"
+      DASHBOARD_PASSWORD: "${DASHBOARD_PASSWORD:-}"
+      SECRET_KEY: "${SECRET_KEY:-}"
+
+      ALERTS_ENABLED: "${ALERTS_ENABLED:-false}"
+      ALERT_WEBHOOK_URL: "${ALERT_WEBHOOK_URL:-}"
+      ALERT_WEBHOOK_FORMAT: "${ALERT_WEBHOOK_FORMAT:-slack}"
+      ALERT_SCORE_THRESHOLD: "${ALERT_SCORE_THRESHOLD:-70}"
     restart: unless-stopped
+
+volumes:
+  sdwan-data:

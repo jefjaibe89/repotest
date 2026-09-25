@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in — Catalyst SD-WAN Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 50 32'><rect x='0' y='14' width='6' height='12' fill='%2300BCEB'/><rect x='8' y='8' width='6' height='18' fill='%2300BCEB'/><rect x='16' y='2' width='6' height='24' fill='%2300BCEB'/><rect x='24' y='8' width='6' height='18' fill='%2300BCEB'/><rect x='32' y='14' width='6' height='12' fill='%2300BCEB'/></svg>" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body class="login-body">
+  <form class="login-card" method="post">
+    <svg class="login-logo" viewBox="0 0 50 32" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0"  y="14" width="6" height="12" rx="1" fill="#00BCEB"/>
+      <rect x="8"  y="8"  width="6" height="18" rx="1" fill="#00BCEB"/>
+      <rect x="16" y="2"  width="6" height="24" rx="1" fill="#00BCEB"/>
+      <rect x="24" y="8"  width="6" height="18" rx="1" fill="#00BCEB"/>
+      <rect x="32" y="14" width="6" height="12" rx="1" fill="#00BCEB"/>
+      <rect x="40" y="20" width="6" height="6"  rx="1" fill="#00BCEB"/>
+    </svg>
+
+    <h1 class="login-title">Catalyst SD-WAN</h1>
+    <p class="login-sub">Health Dashboard</p>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="login-error">{{ messages[0] }}</div>
+      {% endif %}
+    {% endwith %}
+
+    <label class="login-label" for="username">Username</label>
+    <input class="login-input" id="username" name="username" type="text"
+           autocomplete="username" required autofocus />
+
+    <label class="login-label" for="password">Password</label>
+    <input class="login-input" id="password" name="password" type="password"
+           autocomplete="current-password" required />
+
+    <button class="login-btn" type="submit">Sign in</button>
+  </form>
+</body>
+</html>
