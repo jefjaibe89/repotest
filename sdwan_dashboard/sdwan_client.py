@@ -247,6 +247,53 @@ class SDWANClient:
         data = self._get(f"/device/omp/routes/received?deviceId={device_id}")
         return data.get("data", [])
 
+    # ------------------------------------------------------ QoS and capacity
+    def get_qos_stats(self) -> list[dict]:
+        """Per-interface, per-queue counters from the applied QoS policy."""
+        data = self._get("/device/qos/scheduler")
+        return data.get("data", [])
+
+    def get_link_stats(self) -> list[dict]:
+        """WAN interfaces with their configured bandwidth, for utilisation."""
+        data = self._get("/device/interface?vpn-id=0")
+        return data.get("data", [])
+
+    # -------------------------------------------- application-aware routing
+    def get_sla_classes(self) -> list[dict]:
+        """SLA class definitions: the latency/loss/jitter budget of each class."""
+        data = self._get("/device/app-route/sla-class")
+        return data.get("data", [])
+
+    def get_app_route_stats(self) -> list[dict]:
+        """Per-tunnel app-route measurements, used to judge SLA compliance."""
+        data = self._get("/device/app-route/statistics")
+        return data.get("data", [])
+
+    def get_app_route_events(self, hours: int = 24) -> list[dict]:
+        """Path switchovers: when app-aware routing moved traffic, and why."""
+        payload = {
+            "query": {
+                "condition": "AND",
+                "rules": [
+                    {
+                        "value": [str(hours)],
+                        "field": "entry_time",
+                        "type": "date",
+                        "operator": "last_n_hours",
+                    },
+                    {
+                        "value": ["app-route-sla-change"],
+                        "field": "eventname",
+                        "type": "string",
+                        "operator": "in",
+                    },
+                ],
+            },
+            "size": 100,
+        }
+        data = self._request("POST", "/event", json=payload)
+        return data.get("data", [])
+
     def get_system_status(self, device_id: str) -> dict:
         data = self._get(f"/device/system/status?deviceId={device_id}")
         return data.get("data", [{}])[0]
@@ -443,4 +490,122 @@ class MockSDWANClient:
             {"vpn-id": "10", "prefix": "10.1.0.0/16", "from-peer": "2.2.2.1", "status": "C,I,R"},
             {"vpn-id": "10", "prefix": "10.2.0.0/16", "from-peer": "2.2.2.1", "status": "C,I,R"},
             {"vpn-id": "20", "prefix": "192.168.0.0/16", "from-peer": "2.2.2.2", "status": "C,I,R"},
+        ]
+
+    # ------------------------------------------------------ QoS and capacity
+    def get_qos_stats(self) -> list[dict]:
+        """Four queues per WAN interface, as a branch QoS policy normally has.
+
+        Voice is policed but never dropped; the pain shows up in best-effort on
+        the congested internet circuits, which is where it shows up in practice.
+        """
+        rows = [
+            # host, interface, policy, queue, class, tx-pkts, tx-bytes, drops
+            ("cedge-BR1-MPLS", "GigabitEthernet0/0/0", "BRANCH-QOS", 0, "voice",         1_284_000,   205_440_000,      0),
+            ("cedge-BR1-MPLS", "GigabitEthernet0/0/0", "BRANCH-QOS", 1, "critical-data",   842_500,   674_000_000,     31),
+            ("cedge-BR1-MPLS", "GigabitEthernet0/0/0", "BRANCH-QOS", 2, "business",      1_105_300,   994_770_000,    218),
+            ("cedge-BR1-MPLS", "GigabitEthernet0/0/0", "BRANCH-QOS", 3, "best-effort",   2_640_800, 1_848_560_000,  4_912),
+
+            ("cedge-BR1-INET", "GigabitEthernet0/0/1", "BRANCH-QOS", 0, "voice",           962_100,   153_936_000,      0),
+            ("cedge-BR1-INET", "GigabitEthernet0/0/1", "BRANCH-QOS", 1, "critical-data",   611_400,   489_120_000,    402),
+            ("cedge-BR1-INET", "GigabitEthernet0/0/1", "BRANCH-QOS", 2, "business",        884_200,   795_780_000,  3_140),
+            ("cedge-BR1-INET", "GigabitEthernet0/0/1", "BRANCH-QOS", 3, "best-effort",   3_218_900, 2_253_230_000, 41_870),
+
+            ("cedge-BR2-MPLS", "GigabitEthernet0/0/0", "BRANCH-QOS", 0, "voice",           704_600,   112_736_000,      0),
+            ("cedge-BR2-MPLS", "GigabitEthernet0/0/0", "BRANCH-QOS", 1, "critical-data",   398_200,   318_560_000,      8),
+            ("cedge-BR2-MPLS", "GigabitEthernet0/0/0", "BRANCH-QOS", 2, "business",        612_900,   551_610_000,     94),
+            ("cedge-BR2-MPLS", "GigabitEthernet0/0/0", "BRANCH-QOS", 3, "best-effort",   1_488_300, 1_041_810_000,  1_204),
+
+            ("cedge-HQ-1",     "GigabitEthernet0/0/0", "HQ-QOS",     0, "voice",         4_112_700,   658_032_000,      0),
+            ("cedge-HQ-1",     "GigabitEthernet0/0/0", "HQ-QOS",     1, "critical-data", 3_004_100, 2_403_280_000,     52),
+            ("cedge-HQ-1",     "GigabitEthernet0/0/0", "HQ-QOS",     2, "business",      5_218_600, 4_696_740_000,    611),
+            ("cedge-HQ-1",     "GigabitEthernet0/0/0", "HQ-QOS",     3, "best-effort",   9_884_200, 6_918_940_000,  7_330),
+
+            ("cedge-DC1-1",    "GigabitEthernet0/0/0", "DC-QOS",     0, "voice",         6_440_900, 1_030_544_000,      0),
+            ("cedge-DC1-1",    "GigabitEthernet0/0/0", "DC-QOS",     1, "critical-data", 5_118_300, 4_094_640_000,      0),
+            ("cedge-DC1-1",    "GigabitEthernet0/0/0", "DC-QOS",     2, "business",      8_002_400, 7_202_160_000,    145),
+            ("cedge-DC1-1",    "GigabitEthernet0/0/0", "DC-QOS",     3, "best-effort",  14_330_700, 10_031_490_000, 2_088),
+        ]
+        return [
+            {
+                "host-name": host, "interface": iface, "policy-name": policy,
+                "queue-id": queue, "class-name": cls, "vpn-id": "0",
+                "tx-packets": pkts, "tx-bytes": byts, "drop-packets": drops,
+            }
+            for host, iface, policy, queue, cls, pkts, byts, drops in rows
+        ]
+
+    def get_link_stats(self) -> list[dict]:
+        """WAN circuits with configured bandwidth, so utilisation is a ratio.
+
+        Bandwidth is in kbps, matching how vManage reports it.
+        """
+        rows = [
+            # host, interface, color, bw-up, bw-down, tx, rx, status
+            ("cedge-BR1-MPLS", "GigabitEthernet0/0/0", "mpls",          100_000, 100_000,  45_000,  38_000, "Up"),
+            ("cedge-BR1-INET", "GigabitEthernet0/0/1", "biz-internet",  200_000, 200_000, 184_000, 171_000, "Up"),
+            ("cedge-BR2-MPLS", "GigabitEthernet0/0/0", "mpls",           50_000,  50_000,  30_000,  22_000, "Up"),
+            ("cedge-HQ-1",     "GigabitEthernet0/0/0", "mpls",          500_000, 500_000, 280_000, 310_000, "Up"),
+            ("cedge-DC1-1",    "GigabitEthernet0/0/0", "biz-internet", 1_000_000, 1_000_000, 540_000, 490_000, "Up"),
+            ("cedge-BR1-INET", "GigabitEthernet0/0/2", "lte",            20_000,  20_000,       0,       0, "Down"),
+        ]
+        return [
+            {
+                "host-name": host, "interface": iface, "color": color,
+                "bandwidth-upstream": up, "bandwidth-downstream": down,
+                "tx-kbps": tx, "rx-kbps": rx, "if-oper-status": status, "vpn-id": "0",
+            }
+            for host, iface, color, up, down, tx, rx, status in rows
+        ]
+
+    # -------------------------------------------- application-aware routing
+    def get_sla_classes(self) -> list[dict]:
+        return [
+            {"name": "VOICE-SLA",    "latency": 50,  "loss": 1.0, "jitter": 20},
+            {"name": "CRITICAL-SLA", "latency": 150, "loss": 2.0, "jitter": 50},
+            {"name": "BULK-SLA",     "latency": 300, "loss": 5.0, "jitter": 100},
+        ]
+
+    def get_app_route_stats(self) -> list[dict]:
+        """Per-tunnel measurements against the SLA class bound to each one."""
+        rows = [
+            # host, local-color, remote-ip, remote-color, sla, latency, loss, jitter, policy
+            ("cedge-BR1-MPLS", "mpls",         "10.0.3.1", "mpls",          "VOICE-SLA",    12,  0.0,  2, "AAR-VOICE"),
+            ("cedge-BR1-MPLS", "mpls",         "10.0.4.1", "mpls",          "CRITICAL-SLA", 18,  0.1,  3, "AAR-CRITICAL"),
+            ("cedge-BR1-INET", "biz-internet", "10.0.3.1", "biz-internet",  "VOICE-SLA",    34,  0.4,  8, "AAR-VOICE"),
+            # Out of SLA on both loss and jitter: this is what moved the traffic.
+            ("cedge-BR1-INET", "biz-internet", "10.0.4.1", "biz-internet",  "VOICE-SLA",    78,  3.2, 27, "AAR-VOICE"),
+            ("cedge-BR2-MPLS", "mpls",         "10.0.3.1", "mpls",          "VOICE-SLA",    15,  0.0,  2, "AAR-VOICE"),
+            ("cedge-BR2-MPLS", "mpls",         "10.0.4.1", "mpls",          "BULK-SLA",     22,  0.3,  6, "AAR-BULK"),
+            ("cedge-HQ-1",     "mpls",         "10.0.4.1", "mpls",          "CRITICAL-SLA",  8,  0.0,  1, "AAR-CRITICAL"),
+            ("cedge-DC1-1",    "biz-internet", "10.0.2.1", "biz-internet",  "BULK-SLA",     41,  1.2, 11, "AAR-BULK"),
+            # Latency over the CRITICAL budget, loss and jitter still fine.
+            ("cedge-DC1-1",    "biz-internet", "10.0.3.1", "biz-internet",  "CRITICAL-SLA", 187, 1.8, 34, "AAR-CRITICAL"),
+        ]
+        return [
+            {
+                "host-name": host, "local-color": local, "remote-system-ip": remote_ip,
+                "remote-color": remote_color, "sla-class": sla, "app-route-policy": policy,
+                "latency": lat, "loss": loss, "jitter": jit,
+            }
+            for host, local, remote_ip, remote_color, sla, lat, loss, jit, policy in rows
+        ]
+
+    def get_app_route_events(self, hours: int = 24) -> list[dict]:
+        """Recent path switchovers, newest first."""
+        now = int(time.time() * 1000)
+        minute = 60_000
+        rows = [
+            (now - 14 * minute,  "cedge-BR1-INET", "AAR-VOICE",    "VOICE-SLA",    "biz-internet", "mpls",         "loss"),
+            (now - 52 * minute,  "cedge-DC1-1",    "AAR-CRITICAL", "CRITICAL-SLA", "biz-internet", "mpls",         "latency"),
+            (now - 96 * minute,  "cedge-BR1-INET", "AAR-VOICE",    "VOICE-SLA",    "mpls",         "biz-internet", "recovered"),
+            (now - 183 * minute, "cedge-BR2-MPLS", "AAR-BULK",     "BULK-SLA",     "mpls",         "biz-internet", "jitter"),
+            (now - 301 * minute, "cedge-BR1-INET", "AAR-VOICE",    "VOICE-SLA",    "biz-internet", "mpls",         "loss"),
+        ]
+        return [
+            {
+                "entry_time": ts, "host-name": host, "app-route-policy": policy,
+                "sla-class": sla, "from-color": src, "to-color": dst, "reason": reason,
+            }
+            for ts, host, policy, sla, src, dst, reason in rows
         ]

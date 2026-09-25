@@ -17,6 +17,7 @@ import threading
 import time
 
 import alerts
+import analysis
 import config
 import health as health_mod
 import store
@@ -51,6 +52,16 @@ def collect(client) -> dict:
     interfaces = client.get_interface_stats()
     alarms_list = client.get_alarms(config.ALARM_WINDOW_HOURS)
     tunnels = client.get_tunnel_stats()
+
+    # Inputs for the specialised views. Collected on the same cadence as
+    # everything else, so opening one of them costs the controller nothing.
+    qos = analysis.analyse_qos(client.get_qos_stats())
+    links = analysis.analyse_links(client.get_link_stats())
+    aar = analysis.analyse_aar(
+        stats=client.get_app_route_stats(),
+        classes=client.get_sla_classes(),
+        events=client.get_app_route_events(config.ALARM_WINDOW_HOURS),
+    )
 
     report = health_mod.compute(
         devices=devices_raw, bfd=bfd, control=control, alarms=alarms_list
@@ -92,6 +103,9 @@ def collect(client) -> dict:
         "control": control,
         "interfaces": interfaces,
         "tunnels": tunnels,
+        "qos": qos,
+        "links": links,
+        "aar": aar,
     }
 
 

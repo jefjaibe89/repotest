@@ -11,7 +11,12 @@ import pytest
 import config
 from sdwan_client import SDWANClient, describe
 
-JS = (Path(__file__).resolve().parent.parent / "static" / "js" / "dashboard.js").read_text()
+JS_DIR = Path(__file__).resolve().parent.parent / "static" / "js"
+
+# Every first-party script, so a new view cannot introduce an unescaped sink
+# without these checks seeing it. The vendored library is not ours to audit.
+JS_FILES = sorted(p for p in JS_DIR.glob("*.js"))
+JS = "\n".join(p.read_text() for p in JS_FILES)
 
 
 # ------------------------------------------------- escaping in the front end

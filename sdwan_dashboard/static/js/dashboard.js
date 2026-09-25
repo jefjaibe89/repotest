@@ -2,9 +2,6 @@
 "use strict";
 
 // ---------------------------------------------------------------- Chart setup
-Chart.defaults.color = "#7A9BBF";
-Chart.defaults.borderColor = "#253D57";
-
 let chartReachability = null;
 let chartBfd = null;
 let chartThroughput = null;
@@ -12,58 +9,6 @@ let chartHealthScore = null;
 let chartTrend = null;
 let trendHours = 1;
 
-// Consecutive failed refreshes. The banner only appears once a refresh has
-// actually failed, so a single blip during a controller failover is not
-// reported as an outage.
-let consecutiveFailures = 0;
-let bannerDismissed = false;
-
-const CISCO_BLUE  = "#00BCEB";
-const GREEN       = "#00D68F";
-const RED         = "#FF4757";
-const ORANGE      = "#FF9A3C";
-const YELLOW      = "#FFD600";
-const SURFACE2    = "#1D2F44";
-
-// ---------------------------------------------------------------- Fetch helpers
-async function fetchJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) {
-    // The API reports SD-WAN failures as {error, message}; surface that text
-    // rather than a bare status code so the operator knows what to fix.
-    let detail = `HTTP ${res.status}`;
-    try {
-      const body = await res.json();
-      if (body && body.message) detail = body.message;
-    } catch (_) { /* non-JSON error page — keep the status code */ }
-    const err = new Error(detail);
-    err.url = url;
-    throw err;
-  }
-  return res.json();
-}
-
-// ---------------------------------------------------------------- Error banner
-function showError(message) {
-  if (bannerDismissed) return;
-  const banner = document.getElementById("error-banner");
-  document.getElementById("error-title").textContent =
-    consecutiveFailures > 1
-      ? t("error.repeated", { count: consecutiveFailures })
-      : t("error.title");
-  document.getElementById("error-detail").textContent = message;
-  banner.hidden = false;
-}
-
-function hideError() {
-  document.getElementById("error-banner").hidden = true;
-  bannerDismissed = false;
-}
-
-document.getElementById("error-dismiss").addEventListener("click", () => {
-  bannerDismissed = true;
-  document.getElementById("error-banner").hidden = true;
-});
 
 // ---------------------------------------------------------------- KPI Summary
 async function loadSummary() {
@@ -88,28 +33,7 @@ async function loadSummary() {
 
 // ---------------------------------------------------------------- Health score
 const GRADE_COLORS = { healthy: GREEN, degraded: ORANGE, critical: RED };
-const SEV_COLORS   = { Critical: RED, Major: ORANGE, Minor: YELLOW, Info: "#7A9BBF" };
-const SEVERITIES   = ["Critical", "Major", "Minor", "Info"];
 
-// ---------------------------------------------------------------- i18n
-// The catalog is inlined by the server (see index.html) so the dashboard
-// still renders with no network egress.
-function t(key, params) {
-  var text = (typeof I18N === "object" && I18N[key]) || key;
-  if (!params) return text;
-  return text.replace(/\{(\w+)\}/g, function (match, name) {
-    return name in params ? params[name] : match;
-  });
-}
-
-// Severity and reachability arrive as vManage's own values; translate them for
-// display only, and fall back to the raw value for anything unrecognised.
-function tSeverity(sev) { return t("alarms.sev." + sev); }
-function tReach(state) {
-  var key = "devices." + String(state).toLowerCase();
-  var out = t(key);
-  return out === key ? state : out;
-}
 
 async function loadHealth() {
   const h = await fetchJSON("/api/health");
@@ -308,10 +232,6 @@ async function loadTunnels() {
   }).join("");
 }
 
-function num(value, suffix = "") {
-  if (value === null || value === undefined) return `<span style="color:#7A9BBF">—</span>`;
-  return `${value}${suffix}`;
-}
 
 // ---------------------------------------------------------------- Device Table
 async function loadDevices() {
@@ -683,97 +603,15 @@ document.getElementById("device-search").addEventListener("input", function () {
   });
 });
 
-// ---------------------------------------------------------------- Timestamp
-function setLastUpdate(fetchedAt) {
-  // Show when the data was collected, not when the browser drew it.
-  const when = fetchedAt ? new Date(fetchedAt * 1000) : new Date();
-  const el = document.getElementById("last-update");
-  el.textContent = t("status.updated", { time: when.toLocaleTimeString(LOCALE) });
-  el.style.color = "";
-}
-
-// ---------------------------------------------------------------- HTML escape
-function esc(str) {
-  if (str === null || str === undefined) return "—";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-// ---------------------------------------------------------------- Full refresh
-async function refreshAll() {
-  // allSettled, not all: one dead panel must not blank out the others.
-  const results = await Promise.allSettled([
-    loadHealth(),
-    loadSummary(),
-    loadDevices(),
-    loadAlarms(),
-    loadControl(),
-    loadInterfaces(),
-    loadTunnels(),
-    loadTrend(),
-  ]);
-
-  const failures = results.filter(r => r.status === "rejected");
-
-  if (failures.length === 0) {
-    consecutiveFailures = 0;
-    // Data now comes from the poller, so a successful fetch only proves the web
-    // tier is alive. The poller can be failing behind it, serving the last good
-    // payload — /api/status is what says whether the figures are current.
-    await reportPollerHealth();
-    return;
-  }
-
-  consecutiveFailures += 1;
-  failures.forEach(f => console.error("Dashboard refresh error:", f.reason));
-  showError(failures[0].reason?.message || t("error.unknown"));
-
-  // Some panels may have loaded; say when the data on screen was last good.
-  if (failures.length < results.length) setLastUpdate();
-  else markStale();
-}
-
-async function reportPollerHealth() {
-  let status;
-  try {
-    status = await fetchJSON("/api/status");
-  } catch (_) {
-    setLastUpdate();  // Can't tell; the panels loaded, so don't cry wolf.
-    return;
-  }
-
-  if (status.stale || status.error) {
-    const when = status.fetched_at
-      ? new Date(status.fetched_at * 1000).toLocaleTimeString(LOCALE)
-      : t("status.never");
-    document.getElementById("last-update").textContent = t("status.stale", { time: when });
-    document.getElementById("last-update").style.color = "#FF9A3C";
-    // error_key lets a failure raised by the poller render in this
-    // viewer's language; status.error is the English text kept for logs.
-    showError(
-      (status.error_key && t(status.error_key)) ||
-      status.error ||
-      t("error.no_refresh", { seconds: Math.round(status.age_seconds) })
-    );
-  } else {
-    hideError();
-    setLastUpdate(status.fetched_at);
-  }
-}
-
-function markStale() {
-  const el = document.getElementById("last-update");
-  if (!el.textContent.startsWith("Stale")) {
-    // On the very first refresh there is no prior good timestamp to point back to.
-    el.textContent = t("status.stale", { time: t("status.never") });
-  }
-  el.style.color = "#FF9A3C";
-}
 
 // ---------------------------------------------------------------- Boot
-refreshAll();
-setInterval(refreshAll, REFRESH_INTERVAL);
+startAutoRefresh([
+  loadHealth,
+  loadSummary,
+  loadDevices,
+  loadAlarms,
+  loadControl,
+  loadInterfaces,
+  loadTunnels,
+  loadTrend,
+]);

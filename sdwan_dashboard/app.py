@@ -221,20 +221,57 @@ def logout():
     return redirect(url_for("login") if auth.enabled() else url_for("index"))
 
 
-@app.route("/")
-@auth.login_required
-def index():
+# The specialised views. Listed once so the nav and the routes cannot drift
+# apart, and so adding a view is a single entry.
+VIEWS = [
+    {"endpoint": "index", "label": "nav.overview"},
+    {"endpoint": "view_qos", "label": "nav.qos"},
+    {"endpoint": "view_links", "label": "nav.links"},
+    {"endpoint": "view_aar", "label": "nav.aar"},
+]
+
+
+def _render_view(template: str, endpoint: str):
     locale = getattr(g, "locale", i18n.DEFAULT_LOCALE)
     return render_template(
-        "index.html",
+        template,
         refresh_interval=config.REFRESH_INTERVAL_SECONDS,
         mode=config.MODE,
         vmanage_host=config.VMANAGE_HOST,
         auth_enabled=auth.enabled(),
         alerts_enabled=config.ALERTS_ENABLED,
+        views=VIEWS,
+        active_view=endpoint,
         # The panels are rendered in the browser, so it needs the strings too.
         catalog=json.dumps(i18n.catalog(locale), ensure_ascii=False),
     )
+
+
+@app.route("/")
+@auth.login_required
+def index():
+    return _render_view("index.html", "index")
+
+
+@app.route("/qos")
+@auth.login_required
+def view_qos():
+    """Where the QoS policy is dropping traffic, and whether it matters."""
+    return _render_view("qos.html", "view_qos")
+
+
+@app.route("/links")
+@auth.login_required
+def view_links():
+    """How much of each circuit's contracted bandwidth is actually in use."""
+    return _render_view("links.html", "view_links")
+
+
+@app.route("/aar")
+@auth.login_required
+def view_aar():
+    """SLA compliance per tunnel, and the path switchovers it caused."""
+    return _render_view("aar.html", "view_aar")
 
 
 # ------------------------------------------------- liveness (for containers)
@@ -318,6 +355,24 @@ def api_control():
 @auth.login_required
 def api_tunnels():
     return served("tunnels")
+
+
+@app.route("/api/qos")
+@auth.login_required
+def api_qos():
+    return served("qos")
+
+
+@app.route("/api/links")
+@auth.login_required
+def api_links():
+    return served("links")
+
+
+@app.route("/api/aar")
+@auth.login_required
+def api_aar():
+    return served("aar")
 
 
 # ------------------------------------------------------------------- history

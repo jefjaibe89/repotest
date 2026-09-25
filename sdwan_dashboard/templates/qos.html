@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ t("qos.title") }} — {{ t("app.subtitle") }}{% endblock %}
+
+{% block content %}
+  <section class="view-head">
+    <h1 class="view-title">{{ t("qos.title") }}</h1>
+    <p class="view-sub">{{ t("qos.subtitle") }}</p>
+  </section>
+
+  <!-- ---- KPI row ---- -->
+  <section class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("qos.total_drops") }}</p>
+        <p class="kpi-value" id="qos-drops">—</p>
+        <p class="kpi-sub">{{ t("qos.of_packets") }} <span id="qos-packets">—</span></p>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("qos.realtime_drops") }}</p>
+        <p class="kpi-value" id="qos-realtime">—</p>
+        <p class="kpi-sub" id="qos-realtime-verdict">—</p>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("qos.queues_dropping") }}</p>
+        <p class="kpi-value" id="qos-queues">—</p>
+        <p class="kpi-sub">{{ t("qos.across_fabric") }}</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Drop rate by class ---- -->
+  <section class="chart-card">
+    <h3 class="chart-title">{{ t("qos.by_class") }}</h3>
+    <div class="chart-wrap chart-wrap-trend">
+      <canvas id="chartQosClass"></canvas>
+    </div>
+  </section>
+
+  <!-- ---- Per interface ---- -->
+  <section class="table-card">
+    <div class="card-header"><h3>{{ t("qos.per_interface") }}</h3></div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("devices.hostname") }}</th>
+            <th>{{ t("modal.interface") }}</th>
+            <th>{{ t("qos.policy") }}</th>
+            <th>{{ t("qos.tx_packets") }}</th>
+            <th>{{ t("qos.drops") }}</th>
+            <th>{{ t("qos.drop_pct") }}</th>
+          </tr>
+        </thead>
+        <tbody id="qos-iface-tbody">
+          <tr><td colspan="6" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ---- Per queue ---- -->
+  <section class="table-card">
+    <div class="card-header">
+      <h3>{{ t("qos.per_queue") }}</h3>
+      <span class="tunnel-summary">{{ t("qos.sorted_by_drop") }}</span>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("devices.hostname") }}</th>
+            <th>{{ t("modal.interface") }}</th>
+            <th>{{ t("qos.queue") }}</th>
+            <th>{{ t("qos.class") }}</th>
+            <th>{{ t("qos.tx_packets") }}</th>
+            <th>{{ t("qos.drops") }}</th>
+            <th>{{ t("qos.drop_pct") }}</th>
+            <th>{{ t("devices.status") }}</th>
+          </tr>
+        </thead>
+        <tbody id="qos-queue-tbody">
+          <tr><td colspan="8" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/qos.js') }}"></script>
+{% endblock %}
