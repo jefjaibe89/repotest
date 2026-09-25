@@ -185,7 +185,6 @@ html, body {
 .health-grade {
   font-size: 24px;
   font-weight: 700;
-  text-transform: capitalize;
   margin-bottom: 14px;
 }
 
@@ -203,7 +202,10 @@ html, body {
   font-size: 11px;
 }
 
-.health-bar-name { color: var(--text-dim); text-transform: capitalize; }
+/* No text-transform here: capitalisation rules differ by language, and
+   "Plano de control" must not become "Plano De Control". The catalogue
+   supplies each label already cased for its own language. */
+.health-bar-name { color: var(--text-dim); }
 .health-bar-val  { text-align: right; color: var(--text-dim); }
 
 .findings-list {
@@ -477,7 +479,6 @@ html, body {
   border-radius: 12px;
   font-size: 11px;
   font-weight: 600;
-  text-transform: capitalize;
 }
 
 .status-reachable  { background: rgba(0,214,143,.12);  color: var(--green);  border: 1px solid rgba(0,214,143,.3); }
@@ -740,6 +741,48 @@ html, body {
 }
 
 .logout-link:hover { color: var(--cisco-blue); border-color: var(--cisco-blue); }
+
+/* ---- Language switcher ---- */
+.lang-switch {
+  display: flex;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.lang-btn {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .4px;
+  text-decoration: none;
+  padding: 4px 9px;
+  transition: all .2s;
+}
+
+.lang-btn:hover { color: var(--text); background: var(--surface2); }
+
+.lang-btn.active {
+  background: rgba(0,188,235,.15);
+  color: var(--cisco-blue);
+}
+
+.login-lang {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.login-lang .lang-btn {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 12px;
+  padding: 5px 12px;
+}
 
 /* ---- Trend chart ---- */
 .card-header-inline {

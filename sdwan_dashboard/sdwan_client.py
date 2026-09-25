@@ -10,6 +10,8 @@ from typing import Any
 import requests
 import urllib3
 
+import i18n
+
 def _silence_insecure_warning():
     """Suppress urllib3's warning only for a client that opted out of TLS checks.
 
@@ -20,7 +22,16 @@ def _silence_insecure_warning():
 
 
 class SDWANError(Exception):
-    """Base class for every error this module raises."""
+    """Base class for every error this module raises.
+
+    Carries a catalog key alongside the English message so the dashboard can
+    show the reason in the viewer's language instead of whatever language the
+    poller happened to be running in.
+    """
+
+    def __init__(self, message: str, key: str | None = None):
+        super().__init__(message)
+        self.key = key
 
 
 class SDWANAuthError(SDWANError):
@@ -31,26 +42,35 @@ class SDWANConnectionError(SDWANError):
     """vManage was unreachable, timed out, or returned an unusable response."""
 
 
-def describe(exc: Exception) -> str:
-    """Summarise a requests exception in terms an operator can act on.
+def describe_key(exc: Exception) -> str | None:
+    """Catalog key for a transport failure, so the UI can render it translated.
 
-    The raw text carries urllib3 internals and object addresses, which say
-    nothing useful to whoever is looking at the dashboard at 3am.
+    Returns None when the failure has no known cause, and the caller falls back
+    to the exception class name.
     """
     if isinstance(exc, requests.Timeout):
-        return "the controller did not respond in time"
+        return "vmanage.timeout"
     if isinstance(exc, requests.exceptions.SSLError):
         # Never suggest turning verification off here: this is exactly the
         # error an interception attack produces.
-        return (
-            "TLS verification failed — point VMANAGE_VERIFY_SSL at the CA bundle "
-            "that issued the controller's certificate"
-        )
+        return "vmanage.tls"
     if isinstance(exc, requests.exceptions.ProxyError):
-        return "the proxy refused the connection"
+        return "vmanage.proxy"
     if isinstance(exc, requests.ConnectionError):
-        return "the host is unreachable or refused the connection"
-    return exc.__class__.__name__
+        return "vmanage.unreachable"
+    return None
+
+
+def describe(exc: Exception) -> str:
+    """Summarise a requests exception in terms an operator can act on.
+
+    Always English: this text goes to the logs and to the stored record. The
+    browser re-renders it from the key in the viewer's own language.
+    """
+    key = describe_key(exc)
+    if key is None:
+        return exc.__class__.__name__
+    return i18n.translate(key, i18n.DEFAULT_LOCALE)
 
 
 class SDWANClient:
@@ -91,7 +111,8 @@ class SDWANClient:
             )
         except requests.RequestException as exc:
             raise SDWANConnectionError(
-                f"Cannot reach vManage at {self.base_url} — {describe(exc)}"
+                f"Cannot reach vManage at {self.base_url} — {describe(exc)}",
+                key=describe_key(exc),
             ) from exc
 
         # vManage answers a bad login with 200 + an HTML login page and no cookie.
@@ -102,7 +123,9 @@ class SDWANClient:
             return True
 
         self._authenticated = False
-        raise SDWANAuthError("vManage rejected the supplied credentials")
+        raise SDWANAuthError(
+            "vManage rejected the supplied credentials", key="vmanage.unauthorized"
+        )
 
     def _get_token(self):
         try:
@@ -110,7 +133,9 @@ class SDWANClient:
                 f"{self.base_url}/dataservice/client/token", timeout=self.timeout
             )
         except requests.RequestException as exc:
-            raise SDWANConnectionError(f"Failed to fetch XSRF token — {describe(exc)}") from exc
+            raise SDWANConnectionError(
+                f"Failed to fetch XSRF token — {describe(exc)}", key=describe_key(exc)
+            ) from exc
         # vManage <19.2 has no token endpoint; a 404 there is expected and harmless.
         if resp.status_code == 200:
             self.session.headers.update({"X-XSRF-TOKEN": resp.text})
@@ -128,11 +153,16 @@ class SDWANClient:
         try:
             resp = self.session.request(method, url, timeout=self.timeout, **kwargs)
         except requests.RequestException as exc:
-            raise SDWANConnectionError(f"Request to {path} failed — {describe(exc)}") from exc
+            raise SDWANConnectionError(
+                f"Request to {path} failed — {describe(exc)}", key=describe_key(exc)
+            ) from exc
 
         if resp.status_code in (401, 403):
             self._authenticated = False
-            raise SDWANAuthError(f"vManage session expired or unauthorized for {path}")
+            raise SDWANAuthError(
+                f"vManage session expired or unauthorized for {path}",
+                key="vmanage.unauthorized",
+            )
         if resp.status_code >= 400:
             raise SDWANConnectionError(f"vManage returned HTTP {resp.status_code} for {path}")
 

@@ -49,8 +49,8 @@ function showError(message) {
   const banner = document.getElementById("error-banner");
   document.getElementById("error-title").textContent =
     consecutiveFailures > 1
-      ? `Cannot reach vManage (${consecutiveFailures} failed refreshes)`
-      : "Connection problem";
+      ? t("error.repeated", { count: consecutiveFailures })
+      : t("error.title");
   document.getElementById("error-detail").textContent = message;
   banner.hidden = false;
 }
@@ -91,6 +91,26 @@ const GRADE_COLORS = { healthy: GREEN, degraded: ORANGE, critical: RED };
 const SEV_COLORS   = { Critical: RED, Major: ORANGE, Minor: YELLOW, Info: "#7A9BBF" };
 const SEVERITIES   = ["Critical", "Major", "Minor", "Info"];
 
+// ---------------------------------------------------------------- i18n
+// The catalog is inlined by the server (see index.html) so the dashboard
+// still renders with no network egress.
+function t(key, params) {
+  var text = (typeof I18N === "object" && I18N[key]) || key;
+  if (!params) return text;
+  return text.replace(/\{(\w+)\}/g, function (match, name) {
+    return name in params ? params[name] : match;
+  });
+}
+
+// Severity and reachability arrive as vManage's own values; translate them for
+// display only, and fall back to the raw value for anything unrecognised.
+function tSeverity(sev) { return t("alarms.sev." + sev); }
+function tReach(state) {
+  var key = "devices." + String(state).toLowerCase();
+  var out = t(key);
+  return out === key ? state : out;
+}
+
 async function loadHealth() {
   const h = await fetchJSON("/api/health");
 
@@ -100,7 +120,7 @@ async function loadHealth() {
   valueEl.style.color = color;
 
   const gradeEl = document.getElementById("health-grade");
-  gradeEl.textContent = h.grade;
+  gradeEl.textContent = t("health." + h.grade);
   gradeEl.className = `health-grade grade-${h.grade}`;
 
   updateHealthGauge(h.score, color);
@@ -140,7 +160,7 @@ function renderHealthBars(categories) {
   wrap.innerHTML = Object.entries(categories).map(([name, c]) => {
     const color = c.score >= 90 ? GREEN : c.score >= 70 ? ORANGE : RED;
     return `<div class="health-bar-row">
-      <span class="health-bar-name">${esc(name)}</span>
+      <span class="health-bar-name">${esc(t("health.cat." + name))}</span>
       <div class="bar-bg"><div class="bar-fill" style="width:${c.score}%;background:${color}"></div></div>
       <span class="health-bar-val">${c.score}%</span>
     </div>`;
@@ -150,14 +170,17 @@ function renderHealthBars(categories) {
 function renderFindings(findings) {
   const wrap = document.getElementById("health-findings-list");
   if (!findings.length) {
-    wrap.innerHTML = `<div class="finding-all-clear">✓ No issues detected</div>`;
+    wrap.innerHTML = `<div class="finding-all-clear">✓ ${esc(t("health.all_clear"))}</div>`;
     return;
   }
   wrap.innerHTML = findings.slice(0, 8).map(f => {
     const color = SEV_COLORS[f.severity] || SEV_COLORS.Info;
+    // Findings carry a key so they render in this viewer's language. Ones
+    // sourced from a controller alarm have no key and keep vManage's wording.
+    const text = f.key ? t(f.key, f.params) : f.message;
     return `<div class="finding-item">
       <span class="finding-dot" style="background:${color}"></span>
-      <span>${esc(f.message)}</span>
+      <span>${esc(text)}</span>
     </div>`;
   }).join("");
 }
@@ -181,9 +204,9 @@ async function loadTrend() {
   const labels = rows.map(r => {
     const d = new Date(r.ts * 1000);
     if (trendHours > 24) {
-      return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit" });
+      return d.toLocaleString(LOCALE, { month: "short", day: "numeric", hour: "2-digit" });
     }
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
   });
 
   const ctx = document.getElementById("chartTrend").getContext("2d");
@@ -191,7 +214,7 @@ async function loadTrend() {
     labels,
     datasets: [
       {
-        label: "Health score",
+        label: t("chart.health_score"),
         data: rows.map(r => r.score),
         borderColor: CISCO_BLUE,
         backgroundColor: "rgba(0,188,235,.12)",
@@ -202,7 +225,7 @@ async function loadTrend() {
         yAxisID: "y",
       },
       {
-        label: "Devices down",
+        label: t("chart.devices_down"),
         data: rows.map(r => r.unreachable),
         borderColor: RED,
         backgroundColor: "transparent",
@@ -231,13 +254,13 @@ async function loadTrend() {
       plugins: { legend: { position: "top", align: "end", labels: { boxWidth: 12, padding: 14 } } },
       scales: {
         x: { grid: { color: "#253D57" }, ticks: { maxTicksLimit: 10, font: { size: 10 } } },
-        y: { min: 0, max: 100, grid: { color: "#253D57" }, title: { display: true, text: "Score" } },
+        y: { min: 0, max: 100, grid: { color: "#253D57" }, title: { display: true, text: t("chart.score_axis") } },
         y1: {
           position: "right",
           beginAtZero: true,
           grid: { drawOnChartArea: false },
           ticks: { precision: 0 },
-          title: { display: true, text: "Down" },
+          title: { display: true, text: t("chart.down_axis") },
         },
       },
     },
@@ -260,10 +283,10 @@ async function loadTunnels() {
 
   const up = tunnels.filter(t => t.state === "up").length;
   document.getElementById("tunnel-summary").textContent =
-    `${up} up · ${tunnels.length - up} down · ${tunnels.length} total`;
+    t("tunnels.summary", { up: up, down: tunnels.length - up, total: tunnels.length });
 
   if (!tunnels.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="loading-cell">No tunnels reported.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="loading-cell">${esc(t("tunnels.none"))}</td></tr>`;
     return;
   }
 
@@ -299,7 +322,7 @@ async function loadDevices() {
 function renderDeviceTable(devices) {
   const tbody = document.getElementById("device-tbody");
   if (!devices.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="loading-cell">No devices found.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="loading-cell">${esc(t("devices.none"))}</td></tr>`;
     return;
   }
 
@@ -329,7 +352,7 @@ function renderDeviceTable(devices) {
       <td style="color:#7A9BBF">${esc(d.model)}</td>
       <td style="color:#7A9BBF">${esc(d.version)}</td>
       <td>${esc(d.site_id)}</td>
-      <td><span class="status-badge ${statusClass}">${statusDot} ${esc(d.reachability)}</span></td>
+      <td><span class="status-badge ${statusClass}">${statusDot} ${esc(tReach(d.reachability))}</span></td>
       <td>${cpuHtml}</td>
       <td>${memHtml}</td>
     </tr>`;
@@ -352,7 +375,7 @@ async function loadAlarms() {
   const feed = document.getElementById("alarms-feed");
 
   if (!alarms.length) {
-    feed.innerHTML = `<p class="loading-cell">No alarms.</p>`;
+    feed.innerHTML = `<p class="loading-cell">${esc(t("alarms.none"))}</p>`;
     return;
   }
 
@@ -361,11 +384,11 @@ async function loadAlarms() {
     // reaches a class attribute, where a stray quote would break out of it.
     const sev = SEVERITIES.includes(a.severity) ? a.severity : "Info";
     const cls = `alarm-${sev.toLowerCase()}`;
-    const time = a.entry_time ? new Date(a.entry_time).toLocaleString() : "—";
-    const ackHtml = a.acknowledged ? `<div class="alarm-ack">✓ Acknowledged</div>` : "";
+    const time = a.entry_time ? new Date(a.entry_time).toLocaleString(LOCALE) : "—";
+    const ackHtml = a.acknowledged ? `<div class="alarm-ack">✓ ${esc(t("alarms.acknowledged"))}</div>` : "";
     return `<div class="alarm-item ${cls}">
       <div class="alarm-header">
-        <span class="alarm-sev sev-${sev}">${sev}</span>
+        <span class="alarm-sev sev-${sev}">${esc(tSeverity(sev))}</span>
         <span class="alarm-time">${time}</span>
       </div>
       <div class="alarm-msg">${esc(a.message || a.type || "—")}</div>
@@ -380,7 +403,7 @@ async function loadControl() {
   const list = document.getElementById("control-list");
 
   if (!data.length) {
-    list.innerHTML = `<p class="loading-cell">No data.</p>`;
+    list.innerHTML = `<p class="loading-cell">${esc(t("common.no_data"))}</p>`;
     return;
   }
 
@@ -393,13 +416,13 @@ async function loadControl() {
     const total = item.count ?? (up + down);
     const allUp = down === 0;
     const statusCls = allUp ? "status-all-up" : down < total ? "status-partial" : "status-all-down";
-    const statusTxt = allUp ? "All Healthy" : `${esc(down)} Down`;
+    const statusTxt = allUp ? t("control.all_healthy") : t("control.some_down", { count: down });
     return `<div class="control-item">
       <div>
         <div class="control-item-name">${name}</div>
-        <div class="control-item-count">${esc(up)} / ${esc(total)} online</div>
+        <div class="control-item-count">${esc(up)} / ${esc(total)} ${esc(t("common.online"))}</div>
       </div>
-      <div class="control-item-status ${statusCls}">${statusTxt}</div>
+      <div class="control-item-status ${statusCls}">${esc(statusTxt)}</div>
     </div>`;
   }).join("");
 }
@@ -414,7 +437,7 @@ async function loadInterfaces() {
 function updateReachabilityChart(reachable, unreachable) {
   const ctx = document.getElementById("chartReachability").getContext("2d");
   const data = {
-    labels: ["Reachable", "Unreachable"],
+    labels: [t("chart.reachable"), t("chart.unreachable")],
     datasets: [{
       data: [reachable, unreachable],
       backgroundColor: [GREEN, RED],
@@ -443,7 +466,7 @@ function updateReachabilityChart(reachable, unreachable) {
 function updateBfdChart(up, down) {
   const ctx = document.getElementById("chartBfd").getContext("2d");
   const data = {
-    labels: ["Up", "Down"],
+    labels: [t("chart.up"), t("chart.down")],
     datasets: [{
       data: [up, down],
       backgroundColor: [CISCO_BLUE, RED],
@@ -480,13 +503,13 @@ function updateThroughputChart(interfaces) {
     labels,
     datasets: [
       {
-        label: "TX (Mbps)",
+        label: t("chart.tx"),
         data: txData,
         backgroundColor: "rgba(0,188,235,.7)",
         borderRadius: 4,
       },
       {
-        label: "RX (Mbps)",
+        label: t("chart.rx"),
         data: rxData,
         backgroundColor: "rgba(0,214,143,.6)",
         borderRadius: 4,
@@ -531,7 +554,8 @@ const modal = document.getElementById("device-modal");
 function openModal(systemIp, hostname) {
   document.getElementById("modal-title").textContent = hostname || systemIp;
   document.getElementById("modal-subtitle").textContent = systemIp;
-  document.getElementById("modal-body").innerHTML = `<p class="loading-cell">Loading…</p>`;
+  document.getElementById("modal-body").innerHTML =
+    `<p class="loading-cell">${esc(t("common.loading"))}</p>`;
   modal.hidden = false;
   document.body.style.overflow = "hidden";
 
@@ -557,15 +581,19 @@ document.addEventListener("keydown", e => {
 function renderModal(d) {
   const dev = d.device;
   const fields = [
-    ["Type", dev.device_type], ["Model", dev.model], ["Version", dev.version],
-    ["Site", dev.site_id], ["Serial", dev.serial], ["Status", dev.reachability],
-    ["CPU", dev.cpu === null ? "—" : dev.cpu + "%"],
-    ["Memory", dev.memory === null ? "—" : dev.memory + "%"],
+    [t("devices.type"), dev.device_type],
+    [t("devices.model"), dev.model],
+    [t("devices.version"), dev.version],
+    [t("devices.site"), dev.site_id],
+    [t("devices.serial"), dev.serial],
+    [t("devices.status"), tReach(dev.reachability)],
+    [t("devices.cpu"), dev.cpu === null ? "—" : dev.cpu + "%"],
+    [t("devices.memory"), dev.memory === null ? "—" : dev.memory + "%"],
   ];
 
   document.getElementById("modal-body").innerHTML = `
     <div class="modal-section">
-      <p class="modal-section-title">Overview</p>
+      <p class="modal-section-title">${esc(t("modal.overview"))}</p>
       <div class="modal-grid">
         ${fields.map(([k, v]) => `<div>
           <div class="modal-field-label">${esc(k)}</div>
@@ -574,8 +602,9 @@ function renderModal(d) {
       </div>
     </div>
 
-    ${section("Interfaces", d.interfaces,
-      ["Interface", "Admin", "Oper", "IP Address", "VPN", "Speed"],
+    ${section(t("modal.interfaces"), d.interfaces,
+      [t("modal.interface"), t("modal.admin"), t("modal.oper"),
+       t("modal.ip_address"), t("modal.vpn"), t("modal.speed")],
       i => [
         i.ifname,
         i["if-admin-status"],
@@ -585,8 +614,9 @@ function renderModal(d) {
         i["speed-mbps"] ? i["speed-mbps"] + " Mbps" : "—",
       ])}
 
-    ${section("IPsec Tunnels", d.tunnels,
-      ["Remote", "Local Color", "Remote Color", "State", "Latency", "Loss"],
+    ${section(t("modal.tunnels"), d.tunnels,
+      [t("tunnels.remote"), t("tunnels.local_color"), t("tunnels.remote_color"),
+       t("tunnels.state"), t("tunnels.latency"), t("tunnels.loss")],
       t => [
         t["remote-system-ip"],
         t["local-color"],
@@ -596,15 +626,16 @@ function renderModal(d) {
         t["loss-percentage"] === null ? "—" : t["loss-percentage"] + "%",
       ])}
 
-    ${section("Control Connections", d.control_connections,
-      ["Peer Type", "System IP", "Color", "Protocol", "State", "Uptime"],
+    ${section(t("modal.control_connections"), d.control_connections,
+      [t("modal.peer_type"), t("devices.system_ip"), t("modal.color"),
+       t("modal.protocol"), t("tunnels.state"), t("modal.uptime")],
       c => [
         c["peer-type"], c["system-ip"], c["local-color"],
         c.protocol, stateSpan(c.state), c.uptime,
       ])}
 
-    ${section("OMP Routes Received", d.omp_routes,
-      ["VPN", "Prefix", "From Peer", "Status"],
+    ${section(t("modal.omp_routes"), d.omp_routes,
+      [t("modal.vpn"), t("modal.prefix"), t("modal.from_peer"), t("devices.status")],
       r => [r["vpn-id"], r.prefix, r["from-peer"], r.status])}
   `;
 }
@@ -625,7 +656,7 @@ function stateSpan(state) {
 
 function section(title, rows, headers, mapRow) {
   const body = !rows || !rows.length
-    ? `<p class="modal-empty">Nothing reported.</p>`
+    ? `<p class="modal-empty">${esc(t("modal.empty"))}</p>`
     : `<table class="mini-table">
          <thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead>
          <tbody>${rows.map(r => `<tr>${mapRow(r).map(cellHtml).join("")}</tr>`).join("")}</tbody>
@@ -657,7 +688,7 @@ function setLastUpdate(fetchedAt) {
   // Show when the data was collected, not when the browser drew it.
   const when = fetchedAt ? new Date(fetchedAt * 1000) : new Date();
   const el = document.getElementById("last-update");
-  el.textContent = "Updated: " + when.toLocaleTimeString();
+  el.textContent = t("status.updated", { time: when.toLocaleTimeString(LOCALE) });
   el.style.color = "";
 }
 
@@ -699,7 +730,7 @@ async function refreshAll() {
 
   consecutiveFailures += 1;
   failures.forEach(f => console.error("Dashboard refresh error:", f.reason));
-  showError(failures[0].reason?.message || "Unknown error");
+  showError(failures[0].reason?.message || t("error.unknown"));
 
   // Some panels may have loaded; say when the data on screen was last good.
   if (failures.length < results.length) setLastUpdate();
@@ -717,13 +748,16 @@ async function reportPollerHealth() {
 
   if (status.stale || status.error) {
     const when = status.fetched_at
-      ? new Date(status.fetched_at * 1000).toLocaleTimeString()
-      : "never";
-    document.getElementById("last-update").textContent = `Stale — last good ${when}`;
+      ? new Date(status.fetched_at * 1000).toLocaleTimeString(LOCALE)
+      : t("status.never");
+    document.getElementById("last-update").textContent = t("status.stale", { time: when });
     document.getElementById("last-update").style.color = "#FF9A3C";
+    // error_key lets a failure raised by the poller render in this
+    // viewer's language; status.error is the English text kept for logs.
     showError(
+      (status.error_key && t(status.error_key)) ||
       status.error ||
-      `Poller has not refreshed in ${Math.round(status.age_seconds)}s`
+      t("error.no_refresh", { seconds: Math.round(status.age_seconds) })
     );
   } else {
     hideError();
@@ -735,10 +769,7 @@ function markStale() {
   const el = document.getElementById("last-update");
   if (!el.textContent.startsWith("Stale")) {
     // On the very first refresh there is no prior good timestamp to point back to.
-    const previous = el.textContent.startsWith("Updated: ")
-      ? el.textContent.replace(/^Updated: /, "last good ")
-      : "no data yet";
-    el.textContent = `Stale — ${previous}`;
+    el.textContent = t("status.stale", { time: t("status.never") });
   }
   el.style.color = "#FF9A3C";
 }

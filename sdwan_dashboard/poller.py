@@ -121,7 +121,7 @@ def poll_once(client_factory) -> bool:
     except SDWANError as exc:
         _consecutive_failures += 1
         log.warning("Poll failed (%s consecutive): %s", _consecutive_failures, exc)
-        store.record_failure(str(exc), _consecutive_failures)
+        store.record_failure(str(exc), _consecutive_failures, getattr(exc, "key", None))
         return False
     except Exception as exc:  # noqa: BLE001 - the poller thread must never die
         _consecutive_failures += 1

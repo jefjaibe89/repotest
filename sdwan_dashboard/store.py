@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS latest (
     payload              TEXT    NOT NULL,
     fetched_at           REAL    NOT NULL,
     error                TEXT,
-    consecutive_failures INTEGER NOT NULL DEFAULT 0
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    error_key            TEXT
 );
 
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -87,38 +88,51 @@ def _connect():
 def init():
     with _connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn):
+    """Bring an existing database up to the current schema."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(latest)")}
+    if "error_key" not in columns:
+        # Added so the error banner can be rendered in the viewer's language
+        # rather than in whatever language the poller wrote it.
+        conn.execute("ALTER TABLE latest ADD COLUMN error_key TEXT")
 
 
 # ---------------------------------------------------------------- latest state
-def set_latest(payload: dict, fetched_at: float, error: str | None, failures: int):
+def set_latest(payload: dict, fetched_at: float, error: str | None, failures: int,
+               error_key: str | None = None):
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO latest (id, payload, fetched_at, error, consecutive_failures)
-            VALUES (1, ?, ?, ?, ?)
+            INSERT INTO latest (id, payload, fetched_at, error, consecutive_failures, error_key)
+            VALUES (1, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 payload = excluded.payload,
                 fetched_at = excluded.fetched_at,
                 error = excluded.error,
-                consecutive_failures = excluded.consecutive_failures
+                consecutive_failures = excluded.consecutive_failures,
+                error_key = excluded.error_key
             """,
-            (json.dumps(payload), fetched_at, error, failures),
+            (json.dumps(payload), fetched_at, error, failures, error_key),
         )
 
 
-def record_failure(error: str, failures: int):
+def record_failure(error: str, failures: int, error_key: str | None = None):
     """Mark the poll as failed without discarding the last good payload."""
     with _connect() as conn:
         updated = conn.execute(
-            "UPDATE latest SET error = ?, consecutive_failures = ? WHERE id = 1",
-            (error, failures),
+            "UPDATE latest SET error = ?, consecutive_failures = ?, error_key = ? WHERE id = 1",
+            (error, failures, error_key),
         ).rowcount
         if not updated:
             # Nothing has ever been fetched, so there is no payload to preserve.
             conn.execute(
-                """INSERT INTO latest (id, payload, fetched_at, error, consecutive_failures)
-                   VALUES (1, ?, 0, ?, ?)""",
-                (json.dumps({}), error, failures),
+                """INSERT INTO latest
+                       (id, payload, fetched_at, error, consecutive_failures, error_key)
+                   VALUES (1, ?, 0, ?, ?, ?)""",
+                (json.dumps({}), error, failures, error_key),
             )
 
 
@@ -131,6 +145,7 @@ def get_latest() -> dict | None:
         "payload": json.loads(row["payload"]),
         "fetched_at": row["fetched_at"],
         "error": row["error"],
+        "error_key": row["error_key"],
         "consecutive_failures": row["consecutive_failures"],
     }
 

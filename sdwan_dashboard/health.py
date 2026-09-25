@@ -7,6 +7,27 @@ instead of making the operator read five separate panels.
 """
 
 import config
+import i18n
+
+
+def _finding(severity: str, category: str, key: str, **params) -> dict:
+    """Build a finding as a key plus its parameters.
+
+    The dashboard renders it in the viewer's language; `message` is the English
+    rendering, kept because deduplication compares messages and because any
+    consumer of the API that ignores the key still gets readable text.
+    """
+    return {
+        "severity": severity,
+        "category": category,
+        "key": key,
+        "params": params,
+        "message": i18n.translate(key, i18n.DEFAULT_LOCALE, **params),
+    }
+
+
+def _host(device: dict) -> str:
+    return device.get("host-name") or i18n.translate("finding.unknown_host")
 
 # Each category contributes a share of the final score.
 WEIGHTS = {
@@ -30,11 +51,7 @@ def score_reachability(devices: list[dict]) -> tuple[float, list[dict]]:
     down = [d for d in devices if d.get("reachability") != "reachable"]
     ratio = _pct(total - len(down), total)
     findings = [
-        {
-            "severity": "Critical",
-            "category": "reachability",
-            "message": f"{d.get('host-name', 'unknown')} is unreachable",
-        }
+        _finding("Critical", "reachability", "finding.unreachable", host=_host(d))
         for d in down
     ]
     return ratio, findings
@@ -45,14 +62,8 @@ def score_bfd(bfd: list[dict]) -> tuple[float, list[dict]]:
     down = sum(d.get("bfd-sessions-down", 0) for d in bfd)
     ratio = _pct(up, up + down)
     findings = [
-        {
-            "severity": "Major",
-            "category": "bfd",
-            "message": (
-                f"{d.get('host-name', 'unknown')} has "
-                f"{d.get('bfd-sessions-down', 0)} BFD session(s) down"
-            ),
-        }
+        _finding("Major", "bfd", "finding.bfd_down",
+                 host=_host(d), count=d.get("bfd-sessions-down", 0))
         for d in bfd
         if d.get("bfd-sessions-down", 0) > 0
     ]
@@ -64,11 +75,9 @@ def score_control(control: list[dict]) -> tuple[float, list[dict]]:
     up = sum(c.get("up", 0) for c in control)
     ratio = _pct(up, total)
     findings = [
-        {
-            "severity": "Critical",
-            "category": "control",
-            "message": f"{c.get('device-type', 'controller')}: {c.get('down', 0)} down",
-        }
+        _finding("Critical", "control", "finding.control_down",
+                 type=c.get("device-type") or i18n.translate("finding.controller"),
+                 count=c.get("down", 0))
         for c in control
         if c.get("down", 0) > 0
     ]
@@ -82,11 +91,16 @@ def score_alarms(alarms: list[dict]) -> tuple[float, list[dict]]:
     penalty = sum(cost_per_severity.get(a.get("severity", "Info"), 0.0) for a in open_alarms)
     ratio = max(0.0, 1.0 - penalty)
 
+    # An alarm's text comes from the controller, so there is no key to
+    # translate — it is passed through as vManage worded it.
     findings = [
         {
             "severity": a.get("severity", "Info"),
             "category": "alarms",
-            "message": a.get("message") or a.get("type") or "Unnamed alarm",
+            "key": None,
+            "params": {},
+            "message": (a.get("message") or a.get("type")
+                        or i18n.translate("finding.unnamed_alarm")),
         }
         for a in open_alarms
         if a.get("severity") in ("Critical", "Major")
@@ -109,26 +123,20 @@ def score_resources(devices: list[dict]) -> tuple[float, list[dict]]:
 
         if cpu is not None and cpu >= config.CPU_CRIT:
             stressed += 1
-            findings.append({
-                "severity": "Major",
-                "category": "resources",
-                "message": f"{d.get('host-name', 'unknown')} CPU at {cpu}%",
-            })
+            findings.append(
+                _finding("Major", "resources", "finding.cpu_high", host=_host(d), pct=cpu)
+            )
         elif mem is not None and mem >= config.MEM_CRIT:
             stressed += 1
-            findings.append({
-                "severity": "Major",
-                "category": "resources",
-                "message": f"{d.get('host-name', 'unknown')} memory at {mem}%",
-            })
+            findings.append(
+                _finding("Major", "resources", "finding.memory_high", host=_host(d), pct=mem)
+            )
         elif (cpu is not None and cpu >= config.CPU_WARN) or (
             mem is not None and mem >= config.MEM_WARN
         ):
-            findings.append({
-                "severity": "Minor",
-                "category": "resources",
-                "message": f"{d.get('host-name', 'unknown')} approaching resource limits",
-            })
+            findings.append(
+                _finding("Minor", "resources", "finding.resources_warn", host=_host(d))
+            )
 
     return _pct(measured - stressed, measured), findings
 

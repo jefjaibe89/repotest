@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ locale }}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sign in — Catalyst SD-WAN Dashboard</title>
+  <title>{{ t("login.title") }}</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 50 32'><rect x='0' y='14' width='6' height='12' fill='%2300BCEB'/><rect x='8' y='8' width='6' height='18' fill='%2300BCEB'/><rect x='16' y='2' width='6' height='24' fill='%2300BCEB'/><rect x='24' y='8' width='6' height='18' fill='%2300BCEB'/><rect x='32' y='14' width='6' height='12' fill='%2300BCEB'/></svg>" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
 </head>
@@ -18,8 +18,8 @@
       <rect x="40" y="20" width="6" height="6"  rx="1" fill="#00BCEB"/>
     </svg>
 
-    <h1 class="login-title">Catalyst SD-WAN</h1>
-    <p class="login-sub">Health Dashboard</p>
+    <h1 class="login-title">{{ t("login.heading") }}</h1>
+    <p class="login-sub">{{ t("login.subtitle") }}</p>
 
     {% with messages = get_flashed_messages() %}
       {% if messages %}
@@ -27,17 +27,25 @@
       {% endif %}
     {% endwith %}
 
-    <label class="login-label" for="username">Username</label>
+    <label class="login-label" for="username">{{ t("login.username") }}</label>
     <input class="login-input" id="username" name="username" type="text"
            autocomplete="username" required autofocus {{ 'disabled' if locked }} />
 
-    <label class="login-label" for="password">Password</label>
+    <label class="login-label" for="password">{{ t("login.password") }}</label>
     <input class="login-input" id="password" name="password" type="password"
            autocomplete="current-password" required {{ 'disabled' if locked }} />
 
     <button class="login-btn" type="submit" {{ 'disabled' if locked }}>
-      {{ 'Locked' if locked else 'Sign in' }}
+      {{ t("login.locked_button") if locked else t("login.submit") }}
     </button>
+
+    <div class="login-lang" role="group" aria-label="{{ t('nav.language') }}">
+      {% for lang in languages %}
+      <a class="lang-btn {{ 'active' if lang.code == locale }}"
+         href="{{ url_for('set_language', code=lang.code, next='/login') }}"
+         hreflang="{{ lang.code }}" lang="{{ lang.code }}">{{ lang.native }}</a>
+      {% endfor %}
+    </div>
   </form>
 </body>
 </html>

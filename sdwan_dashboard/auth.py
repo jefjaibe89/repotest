@@ -13,9 +13,10 @@ import hmac
 import logging
 import time
 
-from flask import redirect, request, session, url_for
+from flask import g, redirect, request, session, url_for
 
 import config
+import i18n
 import store
 
 log = logging.getLogger("sdwan-dashboard.auth")
@@ -85,7 +86,11 @@ def login_required(fn):
 
         # XHR callers get a 401 to act on; browsers get sent to the login page.
         if request.path.startswith("/api/"):
-            return {"error": "auth_required", "message": "Login required"}, 401
+            locale = getattr(g, "locale", i18n.DEFAULT_LOCALE)
+            return {
+                "error": "auth_required",
+                "message": i18n.translate("error.auth_required", locale),
+            }, 401
         return redirect(url_for("login", next=request.path))
 
     return wrapper

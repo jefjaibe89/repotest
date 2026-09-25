@@ -7,6 +7,7 @@ fixed cadence and writes it to the store, and every route serves from there.
 
 import csv
 import io
+import json
 import logging
 import os
 import threading
@@ -18,6 +19,7 @@ from flask import (
     Flask,
     Response,
     flash,
+    g,
     jsonify,
     redirect,
     render_template,
@@ -28,6 +30,7 @@ from flask import (
 
 import auth
 import config
+import i18n
 import poller
 import store
 from sdwan_client import MockSDWANClient, SDWANClient, SDWANError
@@ -117,6 +120,50 @@ def served(section: str):
     return resp
 
 
+# --------------------------------------------------------------- language
+LOCALE_COOKIE = "dashboard_lang"
+LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
+
+
+@app.before_request
+def _resolve_locale():
+    """Explicit choice wins, then the saved one, then the browser's preference."""
+    g.locale = i18n.negotiate(
+        requested=request.args.get("lang"),
+        cookie=request.cookies.get(LOCALE_COOKIE),
+        header=request.headers.get("Accept-Language"),
+    )
+
+
+@app.context_processor
+def _inject_i18n():
+    locale = getattr(g, "locale", i18n.DEFAULT_LOCALE)
+    return {
+        "t": lambda key, **params: i18n.translate(key, locale, **params),
+        "locale": locale,
+        "languages": i18n.available(),
+    }
+
+
+@app.route("/lang/<code>")
+def set_language(code):
+    """Remember a language choice and return the viewer where they were."""
+    target = _safe_next(request.args.get("next")) or url_for("index")
+    response = redirect(target)
+    if i18n.is_supported(code):
+        response.set_cookie(
+            LOCALE_COOKIE, code,
+            max_age=LOCALE_COOKIE_MAX_AGE,
+            samesite="Lax",
+            secure=config.SESSION_COOKIE_SECURE,
+        )
+    return response
+
+
+def _t(key: str, **params) -> str:
+    return i18n.translate(key, getattr(g, "locale", i18n.DEFAULT_LOCALE), **params)
+
+
 def _safe_next(target: str | None) -> str | None:
     """Return `target` only if it is a same-site path, else None.
 
@@ -149,7 +196,7 @@ def login():
         if locked:
             # Refuse without checking the password, so a locked-out client
             # learns nothing from how the response differs.
-            flash(f"Too many failed attempts. Try again in {locked // 60 + 1} min.")
+            flash(_t("login.too_many", minutes=locked // 60 + 1))
             return render_template("login.html", locked=locked), 429
 
         if auth.check_credentials(request.form.get("username"), request.form.get("password")):
@@ -161,9 +208,9 @@ def login():
 
         lockout = auth.register_failure(cid)
         if lockout:
-            flash(f"Too many failed attempts. Locked for {lockout // 60} min.")
+            flash(_t("login.locked_for", minutes=lockout // 60))
             return render_template("login.html", locked=lockout), 429
-        flash("Invalid credentials")
+        flash(_t("login.invalid"))
 
     return render_template("login.html", locked=locked)
 
@@ -177,6 +224,7 @@ def logout():
 @app.route("/")
 @auth.login_required
 def index():
+    locale = getattr(g, "locale", i18n.DEFAULT_LOCALE)
     return render_template(
         "index.html",
         refresh_interval=config.REFRESH_INTERVAL_SECONDS,
@@ -184,6 +232,8 @@ def index():
         vmanage_host=config.VMANAGE_HOST,
         auth_enabled=auth.enabled(),
         alerts_enabled=config.ALERTS_ENABLED,
+        # The panels are rendered in the browser, so it needs the strings too.
+        catalog=json.dumps(i18n.catalog(locale), ensure_ascii=False),
     )
 
 
@@ -205,7 +255,10 @@ def api_status():
         "has_data": bool(record["payload"]),
         "fetched_at": record["fetched_at"],
         "age_seconds": round(age, 1),
+        # `error` is the English text kept for logs; `error_key` lets the
+        # browser render the same reason in the viewer's language.
         "error": record["error"],
+        "error_key": record.get("error_key"),
         "consecutive_failures": record["consecutive_failures"],
         "stale": bool(record["error"]) or age > config.POLL_INTERVAL_SECONDS * 2,
         "poll_interval": config.POLL_INTERVAL_SECONDS,
