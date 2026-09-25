@@ -10,7 +10,13 @@ from typing import Any
 import requests
 import urllib3
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+def _silence_insecure_warning():
+    """Suppress urllib3's warning only for a client that opted out of TLS checks.
+
+    Calling this at import time silenced it for every client, including ones
+    that do verify — removing the only runtime signal that verification was off.
+    """
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class SDWANError(Exception):
@@ -34,7 +40,12 @@ def describe(exc: Exception) -> str:
     if isinstance(exc, requests.Timeout):
         return "the controller did not respond in time"
     if isinstance(exc, requests.exceptions.SSLError):
-        return "TLS verification failed (check the certificate or set VMANAGE_VERIFY_SSL=false)"
+        # Never suggest turning verification off here: this is exactly the
+        # error an interception attack produces.
+        return (
+            "TLS verification failed — point VMANAGE_VERIFY_SSL at the CA bundle "
+            "that issued the controller's certificate"
+        )
     if isinstance(exc, requests.exceptions.ProxyError):
         return "the proxy refused the connection"
     if isinstance(exc, requests.ConnectionError):
@@ -49,7 +60,7 @@ class SDWANClient:
         port: int,
         username: str,
         password: str,
-        verify_ssl: bool = False,
+        verify_ssl: bool | str = True,
         timeout: int = 20,
     ):
         self.base_url = f"https://{host}:{port}"
@@ -58,7 +69,10 @@ class SDWANClient:
         self.verify_ssl = verify_ssl
         self.timeout = timeout
         self.session = requests.Session()
+        # requests takes True, False, or a CA bundle path here.
         self.session.verify = verify_ssl
+        if verify_ssl is False:
+            _silence_insecure_warning()
         self._authenticated = False
         self.logged_in_at = 0.0
 

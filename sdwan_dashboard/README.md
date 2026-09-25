@@ -129,7 +129,7 @@ All settings are environment variables; see `.env.example` for the full list.
 | `SDWAN_MODE` | `mock` | `live` talks to vManage |
 | `VMANAGE_HOST` / `_PORT` | — / `8443` | Controller address |
 | `VMANAGE_USER` / `_PASS` | — | Credentials |
-| `VMANAGE_VERIFY_SSL` | `false` | Enable once the certificate is trusted |
+| `VMANAGE_VERIFY_SSL` | `true` | `true`, `false`, or a path to the CA bundle for vManage's certificate |
 | `VMANAGE_TIMEOUT` | `20` | Per-request timeout, seconds |
 | `SESSION_TTL_SECONDS` | `900` | How long a vManage login is reused |
 | `POLL_INTERVAL_SECONDS` | `30` | How often the fabric is collected |
@@ -162,6 +162,8 @@ All settings are environment variables; see `.env.example` for the full list.
 **One failing panel does not blank the page.** The browser refreshes panels with `Promise.allSettled`, so a single failing endpoint leaves the rest on screen.
 
 **Errors stay readable.** Transport exceptions are translated before they reach the operator — "the host is unreachable or refused the connection", not a urllib3 object address.
+
+**Escaping is decided by provenance, never by how a value looks.** Only `stateSpan()` can mint a `SafeMarkup`, so no value arriving from vManage can pass itself off as the dashboard's own markup. Config that controls a security boundary fails closed too: an unrecognised `VMANAGE_VERIFY_SSL` is treated as a CA-bundle path and errors, rather than being coerced to "off".
 
 ---
 

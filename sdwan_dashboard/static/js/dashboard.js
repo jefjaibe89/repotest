@@ -89,6 +89,7 @@ async function loadSummary() {
 // ---------------------------------------------------------------- Health score
 const GRADE_COLORS = { healthy: GREEN, degraded: ORANGE, critical: RED };
 const SEV_COLORS   = { Critical: RED, Major: ORANGE, Minor: YELLOW, Info: "#7A9BBF" };
+const SEVERITIES   = ["Critical", "Major", "Minor", "Info"];
 
 async function loadHealth() {
   const h = await fetchJSON("/api/health");
@@ -319,7 +320,7 @@ function renderDeviceTable(devices) {
     const memHtml  = barHtml(d.memory);
 
     return `<tr class="clickable-row"
-                data-search="${(d.hostname + d.system_ip).toLowerCase()}"
+                data-search="${esc((d.hostname + d.system_ip).toLowerCase())}"
                 data-system-ip="${esc(d.system_ip)}"
                 data-hostname="${esc(d.hostname)}">
       <td style="font-weight:600">${esc(d.hostname)}</td>
@@ -356,7 +357,9 @@ async function loadAlarms() {
   }
 
   feed.innerHTML = alarms.map(a => {
-    const sev = a.severity || "Info";
+    // Map through the known severities rather than trusting the field: it
+    // reaches a class attribute, where a stray quote would break out of it.
+    const sev = SEVERITIES.includes(a.severity) ? a.severity : "Info";
     const cls = `alarm-${sev.toLowerCase()}`;
     const time = a.entry_time ? new Date(a.entry_time).toLocaleString() : "—";
     const ackHtml = a.acknowledged ? `<div class="alarm-ack">✓ Acknowledged</div>` : "";
@@ -384,17 +387,17 @@ async function loadControl() {
   const labelMap = { vmanage: "vManage", vsmart: "vSmart", vbond: "vBond" };
 
   list.innerHTML = data.map(item => {
-    const name = labelMap[item["device-type"]] || item["device-type"];
+    const name = labelMap[item["device-type"]] || esc(item["device-type"]);
     const up   = item.up   ?? item.count ?? 0;
     const down = item.down ?? 0;
     const total = item.count ?? (up + down);
     const allUp = down === 0;
     const statusCls = allUp ? "status-all-up" : down < total ? "status-partial" : "status-all-down";
-    const statusTxt = allUp ? "All Healthy" : `${down} Down`;
+    const statusTxt = allUp ? "All Healthy" : `${esc(down)} Down`;
     return `<div class="control-item">
       <div>
         <div class="control-item-name">${name}</div>
-        <div class="control-item-count">${up} / ${total} online</div>
+        <div class="control-item-count">${esc(up)} / ${esc(total)} online</div>
       </div>
       <div class="control-item-status ${statusCls}">${statusTxt}</div>
     </div>`;
@@ -606,9 +609,18 @@ function renderModal(d) {
   `;
 }
 
+// Markup is trusted because of where it came from, never because of how it
+// looks. Only this module can mint a SafeMarkup, so a data value that happens
+// to start with "<span" can no longer pass itself off as our own output.
+class SafeMarkup {
+  constructor(html) { this.html = html; }
+}
+
 function stateSpan(state) {
   const isUp = String(state).toLowerCase() === "up";
-  return `<span class="${isUp ? "state-up" : "state-down"}">● ${esc(state)}</span>`;
+  return new SafeMarkup(
+    `<span class="${isUp ? "state-up" : "state-down"}">● ${esc(state)}</span>`
+  );
 }
 
 function section(title, rows, headers, mapRow) {
@@ -623,10 +635,8 @@ function section(title, rows, headers, mapRow) {
   </div>`;
 }
 
-// stateSpan already returns markup, so only plain values are escaped here.
 function cellHtml(value) {
-  const isMarkup = typeof value === "string" && value.startsWith("<span");
-  return `<td>${isMarkup ? value : esc(value)}</td>`;
+  return `<td>${value instanceof SafeMarkup ? value.html : esc(value)}</td>`;
 }
 
 document.getElementById("device-tbody").addEventListener("click", e => {
@@ -658,7 +668,8 @@ function esc(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // ---------------------------------------------------------------- Full refresh

@@ -83,11 +83,23 @@ def test_logout_revokes_access(client, secured):
     assert client.get("/").status_code == 302
 
 
-def test_next_parameter_cannot_redirect_off_site(client, secured):
-    """An absolute 'next' would turn the login into an open redirect."""
+@pytest.mark.parametrize(
+    "target",
+    [
+        "https://evil.example.com/steal",   # absolute URL
+        "//evil.example.com/steal",         # protocol-relative: starts with "/"
+        "/\\evil.example.com/steal",        # backslash form, treated as a host
+        "https:/evil.example.com",          # single-slash scheme
+    ],
+)
+def test_next_parameter_cannot_redirect_off_site(client, secured, target):
+    """Every off-site form must be rejected, not just the obvious one.
+
+    A leading-slash check passes the protocol-relative form, so testing only
+    'https://' would pass for the wrong reason and hide the hole.
+    """
     resp = client.post(
-        "/login?next=https://evil.example.com/steal",
-        data={"username": "admin", "password": "s3cret"},
+        f"/login?next={target}", data={"username": "admin", "password": "s3cret"}
     )
     assert "evil.example.com" not in resp.headers["Location"]
 

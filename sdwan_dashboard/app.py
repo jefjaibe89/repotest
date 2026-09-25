@@ -8,9 +8,11 @@ fixed cadence and writes it to the store, and every route serves from there.
 import csv
 import io
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from flask import (
     Flask,
@@ -115,6 +117,25 @@ def served(section: str):
     return resp
 
 
+def _safe_next(target: str | None) -> str | None:
+    """Return `target` only if it is a same-site path, else None.
+
+    A leading-slash check is not enough. "//evil.example.com" and
+    "/\\evil.example.com" both start with "/" but browsers resolve them as
+    absolute cross-origin URLs, and Werkzeug passes the Location header
+    through untouched — so the login would redirect off-site after the
+    operator has just typed valid credentials.
+    """
+    if not target or not target.startswith("/"):
+        return None
+    if target.startswith("//") or target.startswith("/\\"):
+        return None
+    parts = urlparse(target)
+    if parts.scheme or parts.netloc:
+        return None
+    return target
+
+
 # ------------------------------------------------------------------ UI routes
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -136,9 +157,7 @@ def login():
             session.clear()
             session["authenticated"] = True
             session.permanent = False
-            target = request.args.get("next")
-            # Only follow relative paths, so the parameter cannot redirect off-site.
-            return redirect(target if target and target.startswith("/") else url_for("index"))
+            return redirect(_safe_next(request.args.get("next")) or url_for("index"))
 
         lockout = auth.register_failure(cid)
         if lockout:
@@ -325,6 +344,22 @@ def bootstrap():
     """Prepare the store and start polling. Safe to call from every worker."""
     store.init()
     auth.warn_if_unprotected()
+
+    if config.MODE == "live" and config.VMANAGE_VERIFY_SSL is False:
+        log.warning(
+            "VMANAGE_VERIFY_SSL is off: vManage credentials are sent over a TLS "
+            "connection whose certificate is not checked. Point it at the CA "
+            "bundle that issued the controller's certificate instead."
+        )
+
+    if auth.enabled() and not os.getenv("SECRET_KEY"):
+        # Each worker would generate its own key, so a session signed by one is
+        # rejected by the next and operators get logged out at random.
+        log.warning(
+            "SECRET_KEY is not set: a random key is generated per process, so "
+            "logins will not survive a restart and will break across workers. "
+            "Set SECRET_KEY to a fixed value."
+        )
     if config.ALERTS_ENABLED:
         log.info("Alerting enabled (%s webhook)", config.ALERT_WEBHOOK_FORMAT)
     poller.start(get_client)

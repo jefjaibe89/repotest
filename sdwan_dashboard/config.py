@@ -15,7 +15,25 @@ VMANAGE_HOST = os.getenv("VMANAGE_HOST", "localhost")
 VMANAGE_PORT = int(os.getenv("VMANAGE_PORT", "8443"))
 VMANAGE_USER = os.getenv("VMANAGE_USER", "admin")
 VMANAGE_PASS = os.getenv("VMANAGE_PASS", "admin")
-VMANAGE_VERIFY_SSL = _flag("VMANAGE_VERIFY_SSL")
+def _verify_setting(raw: str) -> bool | str:
+    """Resolve VMANAGE_VERIFY_SSL into what requests expects.
+
+    Accepts true/false, or a path to a CA bundle — vManage usually presents a
+    private certificate, so pinning the issuing CA is the answer rather than
+    switching verification off. Unrecognised values are treated as a path and
+    fail loudly if it does not exist; coercing them to False (as a plain
+    boolean flag would) turns a typo, or a bundle path, into silently
+    disabled verification.
+    """
+    value = raw.strip()
+    if value.lower() in ("true", "1", "yes", "on"):
+        return True
+    if value.lower() in ("false", "0", "no", "off"):
+        return False
+    return value
+
+
+VMANAGE_VERIFY_SSL = _verify_setting(os.getenv("VMANAGE_VERIFY_SSL", "true"))
 VMANAGE_TIMEOUT = int(os.getenv("VMANAGE_TIMEOUT", "20"))
 
 # Set to "mock" to use demo data without a real vManage instance
