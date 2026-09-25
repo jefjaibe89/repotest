@@ -58,6 +58,16 @@ CREATE TABLE IF NOT EXISTS alert_state (
     first_seen    REAL,
     last_notified REAL
 );
+
+-- Login throttling lives in the database, not in memory: under gunicorn each
+-- worker has its own memory, so an in-process counter would let an attacker
+-- get N attempts per worker instead of N in total.
+CREATE TABLE IF NOT EXISTS login_attempts (
+    client_id     TEXT PRIMARY KEY,
+    failures      INTEGER NOT NULL DEFAULT 0,
+    first_failure REAL,
+    locked_until  REAL
+);
 """
 
 
@@ -224,3 +234,56 @@ def clear_alerts(keys: list[str]):
         return
     with _connect() as conn:
         conn.executemany("DELETE FROM alert_state WHERE key = ?", [(k,) for k in keys])
+
+
+# -------------------------------------------------------------- login attempts
+def get_login_attempt(client_id: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM login_attempts WHERE client_id = ?", (client_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def record_login_failure(client_id: str, now: float, window: float,
+                         max_attempts: int, lockout: float) -> dict:
+    """Count a failed attempt and lock the client out once it crosses the limit."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM login_attempts WHERE client_id = ?", (client_id,)
+        ).fetchone()
+
+        # Old failures expire, so occasional typos never accumulate into a lockout.
+        if row is None or (now - (row["first_failure"] or 0)) > window:
+            failures, first_failure = 1, now
+        else:
+            failures, first_failure = row["failures"] + 1, row["first_failure"]
+
+        locked_until = now + lockout if failures >= max_attempts else None
+
+        conn.execute(
+            """INSERT INTO login_attempts (client_id, failures, first_failure, locked_until)
+               VALUES (?,?,?,?)
+               ON CONFLICT(client_id) DO UPDATE SET
+                   failures = excluded.failures,
+                   first_failure = excluded.first_failure,
+                   locked_until = excluded.locked_until""",
+            (client_id, failures, first_failure, locked_until),
+        )
+
+    return {"failures": failures, "locked_until": locked_until}
+
+
+def clear_login_attempts(client_id: str):
+    with _connect() as conn:
+        conn.execute("DELETE FROM login_attempts WHERE client_id = ?", (client_id,))
+
+
+def prune_login_attempts(before: float):
+    """Drop records whose lockout has expired and whose window has closed."""
+    with _connect() as conn:
+        conn.execute(
+            """DELETE FROM login_attempts
+               WHERE COALESCE(locked_until, 0) < ? AND COALESCE(first_failure, 0) < ?""",
+            (before, before),
+        )

@@ -65,3 +65,12 @@ DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
 # A generated key logs everyone out on restart, which beats shipping a default.
 SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_hex(32)
 SESSION_COOKIE_SECURE = _flag("SESSION_COOKIE_SECURE")
+
+# ---- Login throttling -----------------------------------------------------
+LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
+LOGIN_LOCKOUT_SECONDS = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "300"))
+# Failures older than this no longer count, so occasional typos never add up.
+LOGIN_ATTEMPT_WINDOW_SECONDS = int(os.getenv("LOGIN_ATTEMPT_WINDOW_SECONDS", "900"))
+# Only enable behind a proxy you control: it makes the throttle trust
+# X-Forwarded-For, which clients can otherwise forge to evade the limit.
+TRUST_PROXY_HEADERS = _flag("TRUST_PROXY_HEADERS")

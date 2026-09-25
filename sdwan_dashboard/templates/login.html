@@ -29,13 +29,15 @@
 
     <label class="login-label" for="username">Username</label>
     <input class="login-input" id="username" name="username" type="text"
-           autocomplete="username" required autofocus />
+           autocomplete="username" required autofocus {{ 'disabled' if locked }} />
 
     <label class="login-label" for="password">Password</label>
     <input class="login-input" id="password" name="password" type="password"
-           autocomplete="current-password" required />
+           autocomplete="current-password" required {{ 'disabled' if locked }} />
 
-    <button class="login-btn" type="submit">Sign in</button>
+    <button class="login-btn" type="submit" {{ 'disabled' if locked }}>
+      {{ 'Locked' if locked else 'Sign in' }}
+    </button>
   </form>
 </body>
 </html>

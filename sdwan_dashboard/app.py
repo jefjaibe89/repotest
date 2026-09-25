@@ -121,16 +121,32 @@ def login():
     if not auth.enabled():
         return redirect(url_for("index"))
 
+    cid = auth.client_id()
+    locked = auth.lockout_remaining(cid)
+
     if request.method == "POST":
+        if locked:
+            # Refuse without checking the password, so a locked-out client
+            # learns nothing from how the response differs.
+            flash(f"Too many failed attempts. Try again in {locked // 60 + 1} min.")
+            return render_template("login.html", locked=locked), 429
+
         if auth.check_credentials(request.form.get("username"), request.form.get("password")):
+            auth.register_success(cid)
+            session.clear()
             session["authenticated"] = True
             session.permanent = False
             target = request.args.get("next")
             # Only follow relative paths, so the parameter cannot redirect off-site.
             return redirect(target if target and target.startswith("/") else url_for("index"))
+
+        lockout = auth.register_failure(cid)
+        if lockout:
+            flash(f"Too many failed attempts. Locked for {lockout // 60} min.")
+            return render_template("login.html", locked=lockout), 429
         flash("Invalid credentials")
 
-    return render_template("login.html")
+    return render_template("login.html", locked=locked)
 
 
 @app.route("/logout")

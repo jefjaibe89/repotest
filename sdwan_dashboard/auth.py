@@ -11,12 +11,57 @@ at startup in live mode.
 import functools
 import hmac
 import logging
+import time
 
 from flask import redirect, request, session, url_for
 
 import config
+import store
 
 log = logging.getLogger("sdwan-dashboard.auth")
+
+
+def client_id() -> str:
+    """Identify the caller for throttling purposes.
+
+    X-Forwarded-For is only honoured when the deployment says it sits behind a
+    trusted proxy. Trusting it unconditionally would let an attacker send a
+    fresh header on every request and never be throttled at all.
+    """
+    if config.TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            # Left-most entry is the original client; the rest are proxies.
+            return forwarded.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def lockout_remaining(cid: str) -> int:
+    """Seconds left on this client's lockout, or 0 when it may try again."""
+    record = store.get_login_attempt(cid)
+    if not record or not record.get("locked_until"):
+        return 0
+    remaining = record["locked_until"] - time.time()
+    return max(0, int(remaining))
+
+
+def register_failure(cid: str) -> int:
+    """Record a failed attempt. Returns seconds locked out, 0 if not yet locked."""
+    result = store.record_login_failure(
+        cid,
+        now=time.time(),
+        window=config.LOGIN_ATTEMPT_WINDOW_SECONDS,
+        max_attempts=config.LOGIN_MAX_ATTEMPTS,
+        lockout=config.LOGIN_LOCKOUT_SECONDS,
+    )
+    if result["locked_until"]:
+        log.warning("Locked out %s after %s failed logins", cid, result["failures"])
+        return config.LOGIN_LOCKOUT_SECONDS
+    return 0
+
+
+def register_success(cid: str):
+    store.clear_login_attempts(cid)
 
 
 def enabled() -> bool:
