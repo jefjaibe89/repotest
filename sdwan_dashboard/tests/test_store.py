@@ -1,5 +1,6 @@
 """Tests for the SQLite store."""
 
+import sqlite3
 import time
 
 import store
@@ -88,3 +89,72 @@ def test_alert_state_roundtrip_and_clear():
 
     store.clear_alerts(["device:down:1.1.1.1"])
     assert "device:down:1.1.1.1" not in store.get_alert_state()
+
+
+# ------------------------------------------------- concurrent worker boot
+# gunicorn starts its workers at the same instant and every one of them opens
+# this database immediately. Without a busy timeout that raised "database is
+# locked" on roughly one boot in ten — a worker dying at import for no lasting
+# reason, which is what made the Docker CI job flaky.
+def _boot(db_path, lock_path, queue):
+    import os
+    import sys
+    import traceback
+
+    os.environ.update(DB_PATH=str(db_path), POLLER_LOCK_PATH=str(lock_path),
+                      SDWAN_MODE="mock")
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        import app  # noqa: F401  (importing runs bootstrap)
+        queue.put(None)
+    except Exception:
+        queue.put(traceback.format_exc())
+
+
+def _boot_together(tmp_path, workers, seed=None):
+    import multiprocessing as mp
+
+    ctx = mp.get_context("spawn")
+    db = tmp_path / "concurrent.db"
+    lock = tmp_path / "concurrent.lock"
+    if seed:
+        seed(db)
+
+    queue = ctx.Queue()
+    procs = [ctx.Process(target=_boot, args=(db, lock, queue)) for _ in range(workers)]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join(90)
+    return [queue.get() for _ in procs]
+
+
+def test_workers_starting_together_do_not_crash(tmp_path):
+    failures = [f for f in _boot_together(tmp_path, workers=4) if f]
+    assert not failures, f"a worker died during startup:\n{failures[0]}"
+
+
+def test_workers_can_migrate_an_older_database_together(tmp_path):
+    """The upgrade path is the one that adds a column, so race it too."""
+    def legacy(path):
+        conn = sqlite3.connect(path)
+        conn.execute(
+            """CREATE TABLE latest (
+                   id INTEGER PRIMARY KEY CHECK (id = 1),
+                   payload TEXT NOT NULL, fetched_at REAL NOT NULL,
+                   error TEXT, consecutive_failures INTEGER NOT NULL DEFAULT 0)"""
+        )
+        conn.execute("INSERT INTO latest VALUES (1, '{}', 0, NULL, 0)")
+        conn.commit()
+        conn.close()
+
+    failures = [f for f in _boot_together(tmp_path, workers=4, seed=legacy) if f]
+    assert not failures, f"a worker died migrating:\n{failures[0]}"
+
+
+def test_migration_is_idempotent():
+    """Running it twice must not raise on the second pass."""
+    store.init()
+    store.init()
+    latest = store.get_latest()
+    assert latest is None or "error_key" in latest

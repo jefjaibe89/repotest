@@ -10,11 +10,14 @@ nothing and sidesteps SQLite's thread-affinity rules entirely.
 """
 
 import json
+import logging
 import sqlite3
 import time
 from contextlib import contextmanager
 
 import config
+
+log = logging.getLogger("sdwan-dashboard.store")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS latest (
@@ -72,23 +75,58 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 """
 
 
+CONNECT_TIMEOUT = 30
+
+
 @contextmanager
 def _connect():
-    conn = sqlite3.connect(config.DB_PATH, timeout=10)
+    conn = sqlite3.connect(config.DB_PATH, timeout=CONNECT_TIMEOUT)
     conn.row_factory = sqlite3.Row
     try:
-        # WAL lets the poller write while web workers read.
-        conn.execute("PRAGMA journal_mode=WAL")
+        # Wait for a lock rather than failing immediately. gunicorn starts its
+        # workers at the same instant and they all open this database at once,
+        # which without a busy timeout raises "database is locked" on roughly
+        # one boot in ten — a worker dying at import, for no lasting reason.
+        conn.execute(f"PRAGMA busy_timeout = {CONNECT_TIMEOUT * 1000}")
+        _enable_wal(conn)
         yield conn
         conn.commit()
     finally:
         conn.close()
 
 
+def _enable_wal(conn):
+    """Turn on WAL so the poller can write while web workers read.
+
+    It is a property of the database file, set once and persisted. Another
+    process setting it in the same instant briefly takes an exclusive lock;
+    losing that race is not worth crashing a worker over, because whoever won
+    it set the mode we wanted anyway.
+    """
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError as exc:
+        log.debug("Could not set WAL (another process is starting): %s", exc)
+
+
 def init():
-    with _connect() as conn:
-        conn.executescript(SCHEMA)
-        _migrate(conn)
+    """Create the schema. Safe to call from every worker simultaneously."""
+    try:
+        with _connect() as conn:
+            conn.executescript(SCHEMA)
+            _migrate(conn)
+    except sqlite3.OperationalError as exc:
+        # Every statement here is idempotent, so a worker that loses the race
+        # only needs the tables to exist once the winner has finished.
+        log.debug("Schema creation contended (%s); verifying", exc)
+        with _connect() as conn:
+            tables = {
+                row["name"]
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+        missing = {"latest", "snapshots", "device_samples"} - tables
+        if missing:
+            raise RuntimeError(f"Database schema incomplete: missing {sorted(missing)}") from exc
 
 
 def _migrate(conn):
@@ -97,7 +135,12 @@ def _migrate(conn):
     if "error_key" not in columns:
         # Added so the error banner can be rendered in the viewer's language
         # rather than in whatever language the poller wrote it.
-        conn.execute("ALTER TABLE latest ADD COLUMN error_key TEXT")
+        try:
+            conn.execute("ALTER TABLE latest ADD COLUMN error_key TEXT")
+        except sqlite3.OperationalError as exc:
+            # Another worker added it between the check and here.
+            if "duplicate column" not in str(exc).lower():
+                raise
 
 
 # ---------------------------------------------------------------- latest state
