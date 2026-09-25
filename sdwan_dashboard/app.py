@@ -375,6 +375,13 @@ def api_aar():
     return served("aar")
 
 
+@app.route("/api/enhanced-aar")
+@auth.login_required
+def api_enhanced_aar():
+    """Readiness check: is enhanced AAR actually in effect, not just available."""
+    return served("enhanced_aar")
+
+
 # ------------------------------------------------------------------- history
 @app.route("/api/history")
 @auth.login_required

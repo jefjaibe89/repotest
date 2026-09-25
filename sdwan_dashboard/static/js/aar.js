@@ -12,6 +12,84 @@ const REASON_COLORS = {
   loss: RED, latency: ORANGE, jitter: YELLOW, recovered: GREEN,
 };
 
+// ------------------------------------------------- enhanced AAR readiness
+const EAAR_COLORS = { enabled: GREEN, partial: ORANGE, disabled: RED };
+
+async function loadEnhancedAar() {
+  const d = await fetchJSON("/api/enhanced-aar");
+  const color = EAAR_COLORS[d.state] || DIM;
+
+  const state = document.getElementById("eaar-state");
+  state.textContent = t("eaar.state." + d.state);
+  state.style.color = color;
+  document.getElementById("eaar-card").style.borderLeftColor = color;
+  document.getElementById("eaar-desc").textContent = t("eaar.desc." + d.state);
+
+  document.getElementById("eaar-coverage").textContent =
+    `${d.totals.sla_enhanced}/${d.totals.sla_total}`;
+  document.getElementById("eaar-probes").textContent = d.totals.probe_classes;
+  document.getElementById("eaar-edges").textContent =
+    `${d.totals.devices_supported}/${d.totals.devices_total}`;
+
+  renderEaarClasses(d.classes);
+  renderEaarDevices(d.devices);
+  renderEaarFindings(d.findings);
+}
+
+function renderEaarClasses(classes) {
+  const tbody = document.getElementById("eaar-class-tbody");
+  if (!classes.length) {
+    tbody.innerHTML = emptyRow(5, t("aar.no_classes"));
+    return;
+  }
+  tbody.innerHTML = classes.map(c => {
+    // A binding pointing at a class that does not exist is worse than none:
+    // it reads as configured while still probing with the default DSCP.
+    const label = c.dangling ? t("eaar.dangling")
+                : c.enhanced ? t("eaar.enhanced")
+                : t("eaar.default");
+    const pill = c.dangling ? "critical" : c.enhanced ? "ok" : "warning";
+    return `<tr class="${c.enhanced ? "" : "row-alert"}">
+      <td style="font-weight:600">${esc(c.name)}</td>
+      <td><span class="pill pill-${pill}">${esc(label)}</span></td>
+      <td>${c.probe_class ? `<span class="chip">${esc(c.probe_class)}</span>` : "—"}</td>
+      <td class="mono-cell">${c.dscp === null || c.dscp === undefined ? "—" : esc(c.dscp)}</td>
+      <td>${c.forwarding_class ? `<span class="chip">${esc(c.forwarding_class)}</span>` : "—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderEaarDevices(devices) {
+  const wrap = document.getElementById("eaar-devices");
+  const blocking = devices.filter(d => !d.supported);
+  if (!blocking.length) {
+    wrap.innerHTML = `<div class="finding-all-clear">✓ ${esc(t("eaar.all_supported"))}</div>`;
+    return;
+  }
+  wrap.innerHTML = blocking.map(d => `<div class="eaar-device">
+    <span class="eaar-device-name">${esc(d.hostname)}</span>
+    <span class="eaar-device-ver">
+      ${esc(t("eaar.running"))} <b>${esc(d.version)}</b> ·
+      ${esc(t("eaar.required"))} <b>${esc(d.required || "—")}</b>
+    </span>
+  </div>`).join("");
+}
+
+function renderEaarFindings(findings) {
+  const wrap = document.getElementById("eaar-findings");
+  if (!findings.length) {
+    wrap.innerHTML = `<div class="finding-all-clear">✓ ${esc(t("eaar.all_clear"))}</div>`;
+    return;
+  }
+  wrap.innerHTML = findings.map(f => {
+    const color = SEV_COLORS[f.severity] || DIM;
+    return `<div class="finding-item">
+      <span class="finding-dot" style="background:${color}"></span>
+      <span>${esc(t(f.key, f.params))}</span>
+    </div>`;
+  }).join("");
+}
+
 async function loadAar() {
   const data = await fetchJSON("/api/aar");
   renderAarTotals(data.totals);
@@ -176,4 +254,4 @@ function renderComplianceChart(classes) {
   });
 }
 
-startAutoRefresh([loadAar]);
+startAutoRefresh([loadEnhancedAar, loadAar]);

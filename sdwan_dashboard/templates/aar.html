@@ -7,6 +7,64 @@
     <p class="view-sub">{{ t("aar.subtitle") }}</p>
   </section>
 
+  <!-- ---- Enhanced AAR readiness: qualifies everything below it ---- -->
+  <section class="eaar-card" id="eaar-card">
+    <div class="eaar-head">
+      <div class="eaar-verdict">
+        <span class="eaar-state" id="eaar-state">—</span>
+        <span class="eaar-label">{{ t("eaar.title") }}</span>
+      </div>
+      <div class="eaar-stats">
+        <span class="eaar-stat">
+          <strong id="eaar-coverage">—</strong> {{ t("eaar.coverage") }}
+        </span>
+        <span class="eaar-stat">
+          <strong id="eaar-probes">—</strong> {{ t("eaar.probe_classes") }}
+        </span>
+        <span class="eaar-stat">
+          <strong id="eaar-edges">—</strong> {{ t("eaar.edges_ready") }}
+        </span>
+      </div>
+    </div>
+
+    <p class="eaar-desc" id="eaar-desc">{{ t("common.loading") }}</p>
+    <p class="eaar-why">{{ t("eaar.subtitle") }}</p>
+
+    <div class="eaar-grid">
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("eaar.per_class") }}</p>
+        <div class="table-scroll">
+          <table class="data-table compact">
+            <thead>
+              <tr>
+                <th>{{ t("aar.class") }}</th>
+                <th>{{ t("eaar.probing") }}</th>
+                <th>{{ t("eaar.probe_class") }}</th>
+                <th>{{ t("eaar.dscp") }}</th>
+                <th>{{ t("eaar.forwarding_class") }}</th>
+              </tr>
+            </thead>
+            <tbody id="eaar-class-tbody">
+              <tr><td colspan="5" class="loading-cell">{{ t("common.loading") }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="eaar-block-title" style="margin-top:18px">{{ t("eaar.blocking_devices") }}</p>
+        <div id="eaar-devices" class="eaar-devices">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+      </div>
+
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("eaar.what_to_do") }}</p>
+        <div id="eaar-findings" class="findings-list">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="kpi-grid">
     <div class="kpi-card">
       <div class="kpi-body">

@@ -62,6 +62,13 @@ def collect(client) -> dict:
         classes=client.get_sla_classes(),
         events=client.get_app_route_events(config.ALARM_WINDOW_HOURS),
     )
+    # Whether the SLA figures above can be trusted to describe the traffic they
+    # claim to: that depends on enhanced AAR being configured, not just available.
+    enhanced_aar = analysis.analyse_enhanced_aar(
+        devices=devices_raw,
+        sla_definitions=client.get_sla_class_definitions(),
+        probe_classes=client.get_app_probe_classes(),
+    )
 
     report = health_mod.compute(
         devices=devices_raw, bfd=bfd, control=control, alarms=alarms_list
@@ -106,6 +113,7 @@ def collect(client) -> dict:
         "qos": qos,
         "links": links,
         "aar": aar,
+        "enhanced_aar": enhanced_aar,
     }
 
 

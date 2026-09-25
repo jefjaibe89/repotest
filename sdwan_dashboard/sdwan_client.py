@@ -269,6 +269,24 @@ class SDWANClient:
         data = self._get("/device/app-route/statistics")
         return data.get("data", [])
 
+    def get_app_probe_classes(self) -> list[dict]:
+        """app-probe-class definitions — the DSCP each class sends probes with.
+
+        These are what makes AAR "enhanced": without one, a SLA class is
+        measured with the default probe DSCP, so its numbers describe whichever
+        queue that DSCP lands in rather than the traffic the class governs.
+        """
+        data = self._get("/template/policy/list/appprobe")
+        return data.get("data", [])
+
+    def get_sla_class_definitions(self) -> list[dict]:
+        """SLA classes as configured, which carry the app-probe-class binding.
+
+        Distinct from get_sla_classes(), which reports operational state.
+        """
+        data = self._get("/template/policy/list/sla")
+        return data.get("data", [])
+
     def get_app_route_events(self, hours: int = 24) -> list[dict]:
         """Path switchovers: when app-aware routing moved traffic, and why."""
         payload = {
@@ -349,7 +367,8 @@ class MockSDWANClient:
              "cpu-load": 22, "mem-util": 60, "device-model": "C8300-1N1S-4T2X"},
             {"system-ip": "10.0.2.1", "host-name": "cedge-BR2-MPLS", "device-type": "vedge",
              "reachability": "reachable", "status": "normal", "board-serial": "FTX2215WXYZ",
-             "version": "17.12.3", "site-id": "102", "uptime-date": 1713200000000,
+             # Below the 17.9.1 floor for enhanced AAR: a branch nobody upgraded.
+             "version": "17.6.5", "site-id": "102", "uptime-date": 1713200000000,
              "cpu-load": 31, "mem-util": 68, "device-model": "C8200-1N-4T"},
             {"system-ip": "10.0.3.1", "host-name": "cedge-HQ-1", "device-type": "vedge",
              "reachability": "reachable", "status": "normal", "board-serial": "FTX2210HQHQ",
@@ -589,6 +608,27 @@ class MockSDWANClient:
                 "latency": lat, "loss": loss, "jitter": jit,
             }
             for host, local, remote_ip, remote_color, sla, lat, loss, jit, policy in rows
+        ]
+
+    def get_app_probe_classes(self) -> list[dict]:
+        """A partially rolled out enhanced AAR: two classes probed, one not."""
+        return [
+            {"name": "VOICE-PROBE", "forwardingClass": "voice",
+             "dscp": 46, "referenceCount": 1},
+            {"name": "CRITICAL-PROBE", "forwardingClass": "critical-data",
+             "dscp": 34, "referenceCount": 1},
+        ]
+
+    def get_sla_class_definitions(self) -> list[dict]:
+        return [
+            {"name": "VOICE-SLA", "latency": 50, "loss": 1.0, "jitter": 20,
+             "appProbeClass": "VOICE-PROBE"},
+            {"name": "CRITICAL-SLA", "latency": 150, "loss": 2.0, "jitter": 50,
+             "appProbeClass": "CRITICAL-PROBE"},
+            # No probe class: measured with the default DSCP, so its figures
+            # describe the default queue rather than bulk traffic.
+            {"name": "BULK-SLA", "latency": 300, "loss": 5.0, "jitter": 100,
+             "appProbeClass": None},
         ]
 
     def get_app_route_events(self, hours: int = 24) -> list[dict]:

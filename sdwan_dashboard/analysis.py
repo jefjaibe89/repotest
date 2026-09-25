@@ -267,6 +267,187 @@ def analyse_aar(stats: list[dict], classes: list[dict], events: list[dict]) -> d
     }
 
 
+# -------------------------------------------------------------- enhanced AAR
+# Enhanced application-aware routing sends its probes marked with the DSCP of
+# the traffic class they represent, instead of one default value. It matters
+# because QoS treats DSCP values differently: without it a SLA class is judged
+# by whatever queue the default probe lands in, which may be nothing like the
+# queue its own traffic rides in — so the figures look fine while the traffic
+# they claim to describe is being dropped.
+#
+# Release floors, by software train.
+ENHANCED_AAR_MIN = {
+    17: (17, 9, 1),    # Cisco IOS XE Catalyst SD-WAN
+    20: (20, 9, 1),    # Catalyst SD-WAN controllers and vEdge
+}
+
+
+def parse_version(raw: str | None) -> tuple[int, ...] | None:
+    """Turn "17.12.3" into (17, 12, 3). Returns None for anything unparseable."""
+    if not raw:
+        return None
+    parts = []
+    for piece in str(raw).split("."):
+        digits = "".join(ch for ch in piece if ch.isdigit())
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts) if parts else None
+
+
+def supports_enhanced_aar(raw: str | None) -> tuple[bool, str | None]:
+    """Whether this release can run enhanced AAR, and the floor it is judged by."""
+    version = parse_version(raw)
+    if version is None:
+        return False, None
+
+    floor = ENHANCED_AAR_MIN.get(version[0])
+    if floor is None:
+        # A train with no known floor (18.x, 19.x) never gained the feature.
+        return False, None
+
+    padded = version + (0,) * (len(floor) - len(version))
+    return padded[:len(floor)] >= floor, ".".join(str(n) for n in floor)
+
+
+def analyse_enhanced_aar(
+    devices: list[dict],
+    sla_definitions: list[dict],
+    probe_classes: list[dict],
+) -> dict:
+    """Check whether enhanced AAR is actually in effect, not merely available.
+
+    Three things have to line up: the software has to support it, an
+    app-probe-class has to exist, and each SLA class has to reference one.
+    Any of the three missing leaves some traffic measured by default probes.
+    """
+    probes = {p.get("name"): p for p in probe_classes if p.get("name")}
+
+    # --- per SLA class ---
+    classes = []
+    for definition in sla_definitions:
+        probe_name = definition.get("appProbeClass")
+        probe = probes.get(probe_name) if probe_name else None
+        classes.append({
+            "name": definition.get("name"),
+            "probe_class": probe_name,
+            "enhanced": bool(probe),
+            # A binding that names a class which does not exist is worse than
+            # no binding: it looks configured and measures nothing special.
+            "dangling": bool(probe_name) and probe is None,
+            "dscp": (probe or {}).get("dscp"),
+            "forwarding_class": (probe or {}).get("forwardingClass"),
+            "latency": definition.get("latency"),
+            "loss": definition.get("loss"),
+            "jitter": definition.get("jitter"),
+        })
+
+    # --- per device ---
+    edges = [d for d in devices if d.get("device-type") == "vedge"]
+    device_rows = []
+    for d in edges:
+        ok, floor = supports_enhanced_aar(d.get("version"))
+        device_rows.append({
+            "hostname": d.get("host-name"),
+            "system_ip": d.get("system-ip"),
+            "site_id": d.get("site-id"),
+            "version": d.get("version"),
+            "supported": ok,
+            "required": floor,
+            "reachable": d.get("reachability") == "reachable",
+        })
+    # Blockers first: those are the rows an operator has to act on.
+    device_rows.sort(key=lambda r: (r["supported"], r["hostname"] or ""))
+
+    enhanced = [c for c in classes if c["enhanced"]]
+    blocking = [d for d in device_rows if not d["supported"]]
+    unused = [name for name, p in probes.items()
+              if not any(c["probe_class"] == name for c in classes)]
+
+    if not probes:
+        state = "disabled"
+    elif not enhanced:
+        state = "disabled"
+    elif len(enhanced) < len(classes) or blocking:
+        state = "partial"
+    else:
+        state = "enabled"
+
+    findings = _enhanced_aar_findings(classes, blocking, unused, probes)
+
+    return {
+        "state": state,
+        "classes": classes,
+        "devices": device_rows,
+        "probe_classes": [
+            {
+                "name": p.get("name"),
+                "dscp": p.get("dscp"),
+                "forwarding_class": p.get("forwardingClass"),
+                "used_by": [c["name"] for c in classes if c["probe_class"] == p.get("name")],
+            }
+            for p in probe_classes
+        ],
+        "findings": findings,
+        "totals": {
+            "sla_total": len(classes),
+            "sla_enhanced": len(enhanced),
+            "sla_default": len(classes) - len(enhanced),
+            "coverage_pct": _pct(len(enhanced), len(classes)),
+            "probe_classes": len(probes),
+            "devices_total": len(device_rows),
+            "devices_supported": sum(1 for d in device_rows if d["supported"]),
+            "devices_blocking": len(blocking),
+        },
+    }
+
+
+def _enhanced_aar_findings(classes, blocking, unused, probes) -> list[dict]:
+    """What to actually do about it, most severe first."""
+    findings = []
+
+    if not probes:
+        findings.append({
+            "severity": "Major", "key": "eaar.finding.no_probe_classes", "params": {},
+        })
+
+    for c in classes:
+        if c["dangling"]:
+            findings.append({
+                "severity": "Critical",
+                "key": "eaar.finding.dangling_probe",
+                "params": {"sla": c["name"], "probe": c["probe_class"]},
+            })
+        elif not c["enhanced"]:
+            findings.append({
+                "severity": "Major",
+                "key": "eaar.finding.default_probing",
+                "params": {"sla": c["name"]},
+            })
+
+    for d in blocking:
+        findings.append({
+            "severity": "Major",
+            "key": "eaar.finding.version_too_old",
+            "params": {
+                "host": d["hostname"],
+                "version": d["version"] or "—",
+                "required": d["required"] or "17.9.1",
+            },
+        })
+
+    for name in unused:
+        findings.append({
+            "severity": "Minor",
+            "key": "eaar.finding.probe_unused",
+            "params": {"probe": name},
+        })
+
+    order = {"Critical": 0, "Major": 1, "Minor": 2}
+    findings.sort(key=lambda f: order.get(f["severity"], 9))
+    return findings
+
+
 def _count_reasons(events: list[dict]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for event in events:

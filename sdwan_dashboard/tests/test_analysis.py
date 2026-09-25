@@ -305,3 +305,190 @@ def test_nav_lists_every_view(client):
     body = client.get("/").get_data(as_text=True)
     for path in ("/qos", "/links", "/aar"):
         assert f'href="{path}"' in body
+
+
+# ------------------------------------------------------------- enhanced AAR
+def _dev(version, host="edge1", reachable=True):
+    return {
+        "host-name": host, "system-ip": "10.0.0.1", "site-id": "1",
+        "device-type": "vedge", "version": version,
+        "reachability": "reachable" if reachable else "unreachable",
+    }
+
+
+def _sla(name="VOICE-SLA", probe="VOICE-PROBE"):
+    return {"name": name, "latency": 50, "loss": 1, "jitter": 20, "appProbeClass": probe}
+
+
+def _probe(name="VOICE-PROBE", dscp=46, fc="voice"):
+    return {"name": name, "dscp": dscp, "forwardingClass": fc}
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("17.12.3", (17, 12, 3)),
+    ("20.9.1", (20, 9, 1)),
+    ("17.9.1a", (17, 9, 1)),      # trailing letters are part of Cisco releases
+    ("17.6", (17, 6)),
+    ("", None), (None, None), ("garbage", None),
+])
+def test_version_parsing(raw, expected):
+    assert analysis.parse_version(raw) == expected
+
+
+@pytest.mark.parametrize("version,supported", [
+    ("17.9.1", True),    # exactly the floor
+    ("17.9.0", False),   # one patch below
+    ("17.12.3", True),
+    ("17.6.5", False),
+    ("20.9.1", True),
+    ("20.12.1", True),
+    ("20.6.3", False),
+    ("19.2.1", False),   # a train that never gained the feature
+    ("garbage", False),
+    (None, False),
+])
+def test_release_floor_for_enhanced_aar(version, supported):
+    assert analysis.supports_enhanced_aar(version)[0] is supported
+
+
+def test_short_version_is_padded_not_rejected():
+    """vManage sometimes reports "17.9" with no patch digit."""
+    assert analysis.supports_enhanced_aar("17.9")[0] is False, "17.9.0 < 17.9.1"
+    assert analysis.supports_enhanced_aar("17.10")[0] is True
+
+
+def test_fully_configured_fabric_reads_as_enabled():
+    out = analysis.analyse_enhanced_aar(
+        devices=[_dev("17.12.3")],
+        sla_definitions=[_sla()],
+        probe_classes=[_probe()],
+    )
+    assert out["state"] == "enabled"
+    assert out["findings"] == []
+    assert out["totals"]["coverage_pct"] == 100.0
+
+
+def test_no_probe_classes_reads_as_disabled():
+    out = analysis.analyse_enhanced_aar(
+        devices=[_dev("17.12.3")],
+        sla_definitions=[_sla(probe=None)],
+        probe_classes=[],
+    )
+    assert out["state"] == "disabled"
+    keys = {f["key"] for f in out["findings"]}
+    assert "eaar.finding.no_probe_classes" in keys
+
+
+def test_one_unprobed_class_makes_it_partial():
+    out = analysis.analyse_enhanced_aar(
+        devices=[_dev("17.12.3")],
+        sla_definitions=[_sla("VOICE-SLA"), _sla("BULK-SLA", probe=None)],
+        probe_classes=[_probe()],
+    )
+    assert out["state"] == "partial"
+    assert out["totals"]["sla_default"] == 1
+    assert any(f["params"].get("sla") == "BULK-SLA" for f in out["findings"])
+
+
+def test_binding_to_a_missing_probe_class_is_critical():
+    """It reads as configured while still probing with the default DSCP."""
+    out = analysis.analyse_enhanced_aar(
+        devices=[_dev("17.12.3")],
+        sla_definitions=[_sla(probe="TYPO-PROBE")],
+        probe_classes=[_probe()],
+    )
+    klass = out["classes"][0]
+    assert klass["dangling"] is True
+    assert klass["enhanced"] is False
+
+    dangling = [f for f in out["findings"] if f["key"] == "eaar.finding.dangling_probe"]
+    assert dangling and dangling[0]["severity"] == "Critical"
+
+
+def test_an_old_edge_makes_it_partial_even_when_policy_is_complete():
+    """Configuration alone is not enough; the software has to support it."""
+    out = analysis.analyse_enhanced_aar(
+        devices=[_dev("17.12.3", "new-edge"), _dev("17.6.5", "old-edge")],
+        sla_definitions=[_sla()],
+        probe_classes=[_probe()],
+    )
+    assert out["state"] == "partial"
+    assert out["totals"]["devices_blocking"] == 1
+
+    finding = next(f for f in out["findings"] if f["key"] == "eaar.finding.version_too_old")
+    assert finding["params"]["host"] == "old-edge"
+    assert finding["params"]["required"] == "17.9.1", "the fix names the release needed"
+
+
+def test_controllers_are_not_judged_as_edges():
+    """Only WAN edges run app-route probes; a vSmart is not a blocker."""
+    devices = [
+        {"host-name": "vSmart-1", "device-type": "vsmart", "version": "20.6.1",
+         "reachability": "reachable"},
+        _dev("17.12.3"),
+    ]
+    out = analysis.analyse_enhanced_aar(devices, [_sla()], [_probe()])
+    assert out["totals"]["devices_total"] == 1
+    assert out["state"] == "enabled"
+
+
+def test_blocking_devices_are_listed_first():
+    devices = [_dev("17.12.3", "aaa-new"), _dev("17.6.5", "zzz-old")]
+    rows = analysis.analyse_enhanced_aar(devices, [_sla()], [_probe()])["devices"]
+    assert rows[0]["hostname"] == "zzz-old"
+
+
+def test_unused_probe_class_is_reported_as_minor():
+    out = analysis.analyse_enhanced_aar(
+        devices=[_dev("17.12.3")],
+        sla_definitions=[_sla()],
+        probe_classes=[_probe(), _probe("ORPHAN-PROBE", 18, "bulk")],
+    )
+    unused = [f for f in out["findings"] if f["key"] == "eaar.finding.probe_unused"]
+    assert unused and unused[0]["severity"] == "Minor"
+    assert unused[0]["params"]["probe"] == "ORPHAN-PROBE"
+
+
+def test_findings_are_ordered_by_severity():
+    out = analysis.analyse_enhanced_aar(
+        devices=[_dev("17.6.5")],
+        sla_definitions=[_sla(probe="TYPO"), _sla("BULK-SLA", probe=None)],
+        probe_classes=[_probe(), _probe("ORPHAN", 18, "bulk")],
+    )
+    order = {"Critical": 0, "Major": 1, "Minor": 2}
+    ranks = [order[f["severity"]] for f in out["findings"]]
+    assert ranks == sorted(ranks)
+
+
+def test_probe_class_reports_which_sla_classes_use_it():
+    out = analysis.analyse_enhanced_aar(
+        devices=[_dev("17.12.3")],
+        sla_definitions=[_sla("A"), _sla("B")],
+        probe_classes=[_probe()],
+    )
+    assert out["probe_classes"][0]["used_by"] == ["A", "B"]
+
+
+def test_empty_fabric_does_not_raise():
+    out = analysis.analyse_enhanced_aar([], [], [])
+    assert out["state"] == "disabled"
+    assert out["totals"]["coverage_pct"] == 0.0
+
+
+def test_endpoint_serves_the_readiness_check(client):
+    data = client.get("/api/enhanced-aar").get_json()
+    assert {"state", "classes", "devices", "probe_classes", "findings", "totals"} <= set(data)
+    assert data["state"] in ("enabled", "partial", "disabled")
+
+
+def test_findings_are_translatable(client):
+    """They carry a key and params, like every other finding in the app."""
+    data = client.get("/api/enhanced-aar").get_json()
+    for finding in data["findings"]:
+        assert finding["key"].startswith("eaar.finding.")
+        assert "params" in finding
+
+
+def test_readiness_appears_on_the_aar_page(client):
+    body = client.get("/aar").get_data(as_text=True)
+    assert 'id="eaar-card"' in body
