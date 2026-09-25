@@ -1,0 +1,17 @@
+services:
+  dashboard:
+    build: .
+    container_name: sdwan-health-dashboard
+    ports:
+      - "5000:5000"
+    environment:
+      # Defaults to demo data. Set SDWAN_MODE=live plus the vManage
+      # variables below (or supply them via a .env file) to go live.
+      SDWAN_MODE: "${SDWAN_MODE:-mock}"
+      VMANAGE_HOST: "${VMANAGE_HOST:-}"
+      VMANAGE_PORT: "${VMANAGE_PORT:-8443}"
+      VMANAGE_USER: "${VMANAGE_USER:-}"
+      VMANAGE_PASS: "${VMANAGE_PASS:-}"
+      VMANAGE_VERIFY_SSL: "${VMANAGE_VERIFY_SSL:-false}"
+      REFRESH_INTERVAL_SECONDS: "${REFRESH_INTERVAL_SECONDS:-30}"
+    restart: unless-stopped

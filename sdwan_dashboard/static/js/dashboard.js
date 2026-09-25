@@ -8,6 +8,13 @@ Chart.defaults.borderColor = "#253D57";
 let chartReachability = null;
 let chartBfd = null;
 let chartThroughput = null;
+let chartHealthScore = null;
+
+// Consecutive failed refreshes. The banner only appears once a refresh has
+// actually failed, so a single blip during a controller failover is not
+// reported as an outage.
+let consecutiveFailures = 0;
+let bannerDismissed = false;
 
 const CISCO_BLUE  = "#00BCEB";
 const GREEN       = "#00D68F";
@@ -19,9 +26,42 @@ const SURFACE2    = "#1D2F44";
 // ---------------------------------------------------------------- Fetch helpers
 async function fetchJSON(url) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} — ${url}`);
+  if (!res.ok) {
+    // The API reports SD-WAN failures as {error, message}; surface that text
+    // rather than a bare status code so the operator knows what to fix.
+    let detail = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body && body.message) detail = body.message;
+    } catch (_) { /* non-JSON error page — keep the status code */ }
+    const err = new Error(detail);
+    err.url = url;
+    throw err;
+  }
   return res.json();
 }
+
+// ---------------------------------------------------------------- Error banner
+function showError(message) {
+  if (bannerDismissed) return;
+  const banner = document.getElementById("error-banner");
+  document.getElementById("error-title").textContent =
+    consecutiveFailures > 1
+      ? `Cannot reach vManage (${consecutiveFailures} failed refreshes)`
+      : "Connection problem";
+  document.getElementById("error-detail").textContent = message;
+  banner.hidden = false;
+}
+
+function hideError() {
+  document.getElementById("error-banner").hidden = true;
+  bannerDismissed = false;
+}
+
+document.getElementById("error-dismiss").addEventListener("click", () => {
+  bannerDismissed = true;
+  document.getElementById("error-banner").hidden = true;
+});
 
 // ---------------------------------------------------------------- KPI Summary
 async function loadSummary() {
@@ -42,6 +82,81 @@ async function loadSummary() {
 
   updateReachabilityChart(d.reachable, d.unreachable);
   updateBfdChart(d.bfd_up, d.bfd_down);
+}
+
+// ---------------------------------------------------------------- Health score
+const GRADE_COLORS = { healthy: GREEN, degraded: ORANGE, critical: RED };
+const SEV_COLORS   = { Critical: RED, Major: ORANGE, Minor: YELLOW, Info: "#7A9BBF" };
+
+async function loadHealth() {
+  const h = await fetchJSON("/api/health");
+
+  const color = GRADE_COLORS[h.grade] || GREEN;
+  const valueEl = document.getElementById("health-score-value");
+  valueEl.textContent = h.score;
+  valueEl.style.color = color;
+
+  const gradeEl = document.getElementById("health-grade");
+  gradeEl.textContent = h.grade;
+  gradeEl.className = `health-grade grade-${h.grade}`;
+
+  updateHealthGauge(h.score, color);
+  renderHealthBars(h.categories);
+  renderFindings(h.findings);
+}
+
+function updateHealthGauge(score, color) {
+  const ctx = document.getElementById("chartHealthScore").getContext("2d");
+  const data = {
+    datasets: [{
+      data: [score, 100 - score],
+      backgroundColor: [color, SURFACE2],
+      borderWidth: 0,
+      circumference: 360,
+    }],
+  };
+  if (chartHealthScore) {
+    chartHealthScore.data = data;
+    chartHealthScore.update();
+    return;
+  }
+  chartHealthScore = new Chart(ctx, {
+    type: "doughnut",
+    data,
+    options: {
+      cutout: "78%",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    },
+  });
+}
+
+function renderHealthBars(categories) {
+  const wrap = document.getElementById("health-bars");
+  wrap.innerHTML = Object.entries(categories).map(([name, c]) => {
+    const color = c.score >= 90 ? GREEN : c.score >= 70 ? ORANGE : RED;
+    return `<div class="health-bar-row">
+      <span class="health-bar-name">${esc(name)}</span>
+      <div class="bar-bg"><div class="bar-fill" style="width:${c.score}%;background:${color}"></div></div>
+      <span class="health-bar-val">${c.score}%</span>
+    </div>`;
+  }).join("");
+}
+
+function renderFindings(findings) {
+  const wrap = document.getElementById("health-findings-list");
+  if (!findings.length) {
+    wrap.innerHTML = `<div class="finding-all-clear">✓ No issues detected</div>`;
+    return;
+  }
+  wrap.innerHTML = findings.slice(0, 8).map(f => {
+    const color = SEV_COLORS[f.severity] || SEV_COLORS.Info;
+    return `<div class="finding-item">
+      <span class="finding-dot" style="background:${color}"></span>
+      <span>${esc(f.message)}</span>
+    </div>`;
+  }).join("");
 }
 
 // ---------------------------------------------------------------- Device Table
@@ -284,8 +399,9 @@ document.getElementById("device-search").addEventListener("input", function () {
 
 // ---------------------------------------------------------------- Timestamp
 function setLastUpdate() {
-  document.getElementById("last-update").textContent =
-    "Updated: " + new Date().toLocaleTimeString();
+  const el = document.getElementById("last-update");
+  el.textContent = "Updated: " + new Date().toLocaleTimeString();
+  el.style.color = "";
 }
 
 // ---------------------------------------------------------------- HTML escape
@@ -300,18 +416,44 @@ function esc(str) {
 
 // ---------------------------------------------------------------- Full refresh
 async function refreshAll() {
-  try {
-    await Promise.all([
-      loadSummary(),
-      loadDevices(),
-      loadAlarms(),
-      loadControl(),
-      loadInterfaces(),
-    ]);
+  // allSettled, not all: one dead panel must not blank out the other four.
+  const results = await Promise.allSettled([
+    loadHealth(),
+    loadSummary(),
+    loadDevices(),
+    loadAlarms(),
+    loadControl(),
+    loadInterfaces(),
+  ]);
+
+  const failures = results.filter(r => r.status === "rejected");
+
+  if (failures.length === 0) {
+    consecutiveFailures = 0;
+    hideError();
     setLastUpdate();
-  } catch (err) {
-    console.error("Dashboard refresh error:", err);
+    return;
   }
+
+  consecutiveFailures += 1;
+  failures.forEach(f => console.error("Dashboard refresh error:", f.reason));
+  showError(failures[0].reason?.message || "Unknown error");
+
+  // Some panels may have loaded; say when the data on screen was last good.
+  if (failures.length < results.length) setLastUpdate();
+  else markStale();
+}
+
+function markStale() {
+  const el = document.getElementById("last-update");
+  if (!el.textContent.startsWith("Stale")) {
+    // On the very first refresh there is no prior good timestamp to point back to.
+    const previous = el.textContent.startsWith("Updated: ")
+      ? el.textContent.replace(/^Updated: /, "last good ")
+      : "no data yet";
+    el.textContent = `Stale — ${previous}`;
+  }
+  el.style.color = "#FF9A3C";
 }
 
 // ---------------------------------------------------------------- Boot

@@ -3,48 +3,135 @@ Cisco SD-WAN (Catalyst SD-WAN) vManage REST API client.
 Handles authentication, session management, and all health-check data retrieval.
 """
 
+import time
+from typing import Any
+
 import requests
 import urllib3
-from typing import Any
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+class SDWANError(Exception):
+    """Base class for every error this module raises."""
+
+
+class SDWANAuthError(SDWANError):
+    """vManage rejected the credentials, or the session expired."""
+
+
+class SDWANConnectionError(SDWANError):
+    """vManage was unreachable, timed out, or returned an unusable response."""
+
+
+def describe(exc: Exception) -> str:
+    """Summarise a requests exception in terms an operator can act on.
+
+    The raw text carries urllib3 internals and object addresses, which say
+    nothing useful to whoever is looking at the dashboard at 3am.
+    """
+    if isinstance(exc, requests.Timeout):
+        return "the controller did not respond in time"
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "TLS verification failed (check the certificate or set VMANAGE_VERIFY_SSL=false)"
+    if isinstance(exc, requests.exceptions.ProxyError):
+        return "the proxy refused the connection"
+    if isinstance(exc, requests.ConnectionError):
+        return "the host is unreachable or refused the connection"
+    return exc.__class__.__name__
+
+
 class SDWANClient:
-    def __init__(self, host: str, port: int, username: str, password: str, verify_ssl: bool = False):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        verify_ssl: bool = False,
+        timeout: int = 20,
+    ):
         self.base_url = f"https://{host}:{port}"
         self.username = username
         self.password = password
         self.verify_ssl = verify_ssl
+        self.timeout = timeout
         self.session = requests.Session()
         self.session.verify = verify_ssl
         self._authenticated = False
+        self.logged_in_at = 0.0
+
+    @property
+    def authenticated(self) -> bool:
+        return self._authenticated
 
     # ------------------------------------------------------------------ auth
     def login(self) -> bool:
+        """Authenticate against vManage. Raises on transport failure."""
         url = f"{self.base_url}/j_security_check"
         payload = {"j_username": self.username, "j_password": self.password}
-        resp = self.session.post(url, data=payload, allow_redirects=False)
+        try:
+            resp = self.session.post(
+                url, data=payload, allow_redirects=False, timeout=self.timeout
+            )
+        except requests.RequestException as exc:
+            raise SDWANConnectionError(
+                f"Cannot reach vManage at {self.base_url} — {describe(exc)}"
+            ) from exc
+
+        # vManage answers a bad login with 200 + an HTML login page and no cookie.
         if resp.status_code in (200, 302) and "JSESSIONID" in self.session.cookies:
             self._get_token()
             self._authenticated = True
+            self.logged_in_at = time.time()
             return True
-        return False
+
+        self._authenticated = False
+        raise SDWANAuthError("vManage rejected the supplied credentials")
 
     def _get_token(self):
-        resp = self.session.get(f"{self.base_url}/dataservice/client/token")
+        try:
+            resp = self.session.get(
+                f"{self.base_url}/dataservice/client/token", timeout=self.timeout
+            )
+        except requests.RequestException as exc:
+            raise SDWANConnectionError(f"Failed to fetch XSRF token — {describe(exc)}") from exc
+        # vManage <19.2 has no token endpoint; a 404 there is expected and harmless.
         if resp.status_code == 200:
             self.session.headers.update({"X-XSRF-TOKEN": resp.text})
 
     def logout(self):
-        self.session.get(f"{self.base_url}/logout")
+        try:
+            self.session.get(f"{self.base_url}/logout", timeout=self.timeout)
+        except requests.RequestException:
+            pass  # Best effort: the session is being discarded anyway.
         self._authenticated = False
 
     # ---------------------------------------------------------------- helpers
+    def _request(self, method: str, path: str, **kwargs) -> Any:
+        url = f"{self.base_url}/dataservice{path}"
+        try:
+            resp = self.session.request(method, url, timeout=self.timeout, **kwargs)
+        except requests.RequestException as exc:
+            raise SDWANConnectionError(f"Request to {path} failed — {describe(exc)}") from exc
+
+        if resp.status_code in (401, 403):
+            self._authenticated = False
+            raise SDWANAuthError(f"vManage session expired or unauthorized for {path}")
+        if resp.status_code >= 400:
+            raise SDWANConnectionError(f"vManage returned HTTP {resp.status_code} for {path}")
+
+        # An expired session can also surface as the HTML login page with a 200.
+        try:
+            return resp.json()
+        except ValueError as exc:
+            if "text/html" in resp.headers.get("Content-Type", ""):
+                self._authenticated = False
+                raise SDWANAuthError(f"vManage session expired (HTML response for {path})") from exc
+            raise SDWANConnectionError(f"Malformed JSON from {path}: {exc}") from exc
+
     def _get(self, path: str) -> Any:
-        resp = self.session.get(f"{self.base_url}/dataservice{path}")
-        resp.raise_for_status()
-        return resp.json()
+        return self._request("GET", path)
 
     # -------------------------------------------------------------- endpoints
     def get_device_list(self) -> list[dict]:
@@ -86,12 +173,8 @@ class SDWANClient:
             },
             "size": 100,
         }
-        resp = self.session.post(
-            f"{self.base_url}/dataservice/alarms",
-            json=payload,
-        )
-        resp.raise_for_status()
-        return resp.json().get("data", [])
+        data = self._request("POST", "/alarms", json=payload)
+        return data.get("data", [])
 
     def get_wan_edges(self) -> list[dict]:
         data = self._get("/device?deviceRole=cedge,vedge")

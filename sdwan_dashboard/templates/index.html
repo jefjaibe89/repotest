@@ -4,9 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Cisco Catalyst SD-WAN — Health Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 50 32'><rect x='0' y='14' width='6' height='12' fill='%2300BCEB'/><rect x='8' y='8' width='6' height='18' fill='%2300BCEB'/><rect x='16' y='2' width='6' height='24' fill='%2300BCEB'/><rect x='24' y='8' width='6' height='18' fill='%2300BCEB'/><rect x='32' y='14' width='6' height='12' fill='%2300BCEB'/></svg>" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
-  <!-- Chart.js CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <!-- Chart.js is served locally, not from a CDN: SD-WAN management networks
+       are frequently air-gapped, and the dashboard must render without egress. -->
+  <script src="{{ url_for('static', filename='vendor/chart.umd.js') }}"></script>
 </head>
 <body>
 
@@ -38,6 +40,40 @@
 
 <!-- ===== MAIN LAYOUT ===== -->
 <main class="page-content">
+
+  <!-- ---- Connection error banner (hidden until something fails) ---- -->
+  <div id="error-banner" class="error-banner" hidden>
+    <svg class="error-icon" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+    </svg>
+    <div class="error-body">
+      <strong id="error-title">Connection problem</strong>
+      <span id="error-detail"></span>
+    </div>
+    <button id="error-dismiss" class="error-dismiss" aria-label="Dismiss">&times;</button>
+  </div>
+
+  <!-- ---- Overall fabric health ---- -->
+  <section class="health-hero" id="health-hero">
+    <div class="health-gauge-wrap">
+      <canvas id="chartHealthScore"></canvas>
+      <div class="health-score-overlay">
+        <span id="health-score-value">—</span>
+        <span class="health-score-max">/100</span>
+      </div>
+    </div>
+    <div class="health-hero-body">
+      <p class="health-label">Overall Fabric Health</p>
+      <p class="health-grade" id="health-grade">Loading…</p>
+      <div class="health-bars" id="health-bars"></div>
+    </div>
+    <div class="health-findings">
+      <p class="health-label">Top Issues</p>
+      <div id="health-findings-list" class="findings-list">
+        <p class="loading-cell">Loading…</p>
+      </div>
+    </div>
+  </section>
 
   <!-- ---- Summary KPI Cards ---- -->
   <section class="kpi-grid">
@@ -132,7 +168,13 @@
     <div class="table-card">
       <div class="card-header">
         <h3>Device Inventory &amp; Health</h3>
-        <input id="device-search" class="search-box" type="text" placeholder="Search hostname / IP…" />
+        <div class="card-header-actions">
+          <input id="device-search" class="search-box" type="text" placeholder="Search hostname / IP…" />
+          <a href="/api/export/devices.csv" class="btn-export" download>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            CSV
+          </a>
+        </div>
       </div>
       <div class="table-scroll">
         <table class="data-table" id="device-table">
