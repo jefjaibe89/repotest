@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ t("compat.title") }} — {{ t("app.subtitle") }}{% endblock %}
+
+{% block content %}
+  <section class="view-head">
+    <h1 class="view-title">{{ t("compat.title") }}</h1>
+    <p class="view-sub">{{ t("compat.subtitle") }}</p>
+  </section>
+
+  <section class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("compat.controller") }}</p>
+        <p class="kpi-value" id="compat-version">—</p>
+        <p class="kpi-sub" id="compat-tenancy">—</p>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("compat.served") }}</p>
+        <p class="kpi-value" id="compat-served">—</p>
+        <p class="kpi-sub">{{ t("compat.served_sub") }}</p>
+      </div>
+    </div>
+    <div class="kpi-card kpi-wide">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("compat.evidence") }}</p>
+        <p class="kpi-value alarms-val">
+          <span id="compat-catalogued" style="color:var(--green)">—</span>
+          <span id="compat-variant" style="color:var(--orange)">—</span>
+          <span id="compat-unverified" style="color:var(--text-dim)">—</span>
+        </p>
+        <p class="kpi-sub">
+          <span class="dot-green"></span>{{ t("compat.ev.catalogued") }} &nbsp;
+          <span class="dot-orange"></span>{{ t("compat.ev.variant") }} &nbsp;
+          <span class="dot-yellow" style="background:var(--text-dim)"></span>{{ t("compat.ev.unverified") }}
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="eaar-card">
+    <p class="eaar-why">{{ t("compat.disclaimer") }}</p>
+  </section>
+
+  <section class="table-card">
+    <div class="card-header">
+      <h3>{{ t("compat.sources") }}</h3>
+      <span class="tunnel-summary" id="compat-caps">—</span>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("compat.endpoint") }}</th>
+            <th>{{ t("compat.feeds") }}</th>
+            <th>{{ t("compat.evidence") }}</th>
+            <th>{{ t("compat.this_controller") }}</th>
+          </tr>
+        </thead>
+        <tbody id="compat-tbody">
+          <tr><td colspan="4" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/compat.js') }}"></script>
+{% endblock %}

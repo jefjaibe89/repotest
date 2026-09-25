@@ -317,11 +317,20 @@ def _dev(version, host="edge1", reachable=True):
 
 
 def _sla(name="VOICE-SLA", probe="VOICE-PROBE"):
-    return {"name": name, "latency": 50, "loss": 1, "jitter": 20, "appProbeClass": probe}
+    """Already normalised, the way the client hands it to the analyser."""
+    return {
+        "name": name, "list_id": f"sla-{name}",
+        "latency": 50, "loss": 1, "jitter": 20,
+        "app_probe_class": probe,
+    }
 
 
 def _probe(name="VOICE-PROBE", dscp=46, fc="voice"):
-    return {"name": name, "dscp": dscp, "forwardingClass": fc}
+    return {
+        "name": name, "list_id": name,
+        "dscp": dscp, "forwarding_class": fc,
+        "dscp_map": [{"color": "mpls", "dscp": dscp}], "mixed_dscp": False,
+    }
 
 
 @pytest.mark.parametrize("raw,expected", [

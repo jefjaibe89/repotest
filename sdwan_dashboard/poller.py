@@ -18,6 +18,7 @@ import time
 
 import alerts
 import analysis
+import compat
 import config
 import health as health_mod
 import store
@@ -43,32 +44,66 @@ def acquire_lock() -> bool:
 
 
 def collect(client) -> dict:
-    """Fetch every panel's data and score it. Raises SDWANError on failure."""
+    """Fetch every panel's data and score it.
+
+    The device inventory is required — without it there is no dashboard, so a
+    failure there fails the poll. Everything else is optional: vManage's
+    monitoring API surface varies by release and by what the controller is
+    licensed for, and one endpoint this build does not have must not blank out
+    every panel. Sources that fail are recorded in `degraded`, so a view can
+    say it is unavailable rather than showing an empty table as if it were
+    good news.
+    """
+    degraded: dict[str, str] = {}
+
+    def optional(name, fetch, fallback):
+        try:
+            return fetch()
+        except SDWANError as exc:
+            degraded[name] = str(exc)
+            log.warning("Optional source %r unavailable: %s", name, exc)
+            return fallback
+
+    # Required.
     devices_raw = client.get_device_list()
-    counters = client.get_device_counters()
-    bfd = client.get_bfd_sessions()
-    omp = client.get_omp_peers()
-    control = client.get_control_status()
-    interfaces = client.get_interface_stats()
-    alarms_list = client.get_alarms(config.ALARM_WINDOW_HOURS)
-    tunnels = client.get_tunnel_stats()
+
+    # Optional.
+    counters = optional("counters", client.get_device_counters, {})
+    bfd = optional("bfd", client.get_bfd_sessions, [])
+    omp = optional("omp", client.get_omp_peers, [])
+    control = optional("control", client.get_control_status, [])
+    interfaces = optional("interfaces", client.get_interface_stats, [])
+    alarms_list = optional(
+        "alarms", lambda: client.get_alarms(config.ALARM_WINDOW_HOURS), []
+    )
+    tunnels = optional("tunnels", client.get_tunnel_stats, [])
 
     # Inputs for the specialised views. Collected on the same cadence as
     # everything else, so opening one of them costs the controller nothing.
-    qos = analysis.analyse_qos(client.get_qos_stats())
-    links = analysis.analyse_links(client.get_link_stats())
+    qos = analysis.analyse_qos(optional("qos", client.get_qos_stats, []))
+    links = analysis.analyse_links(optional("links", client.get_link_stats, []))
     aar = analysis.analyse_aar(
-        stats=client.get_app_route_stats(),
-        classes=client.get_sla_classes(),
-        events=client.get_app_route_events(config.ALARM_WINDOW_HOURS),
+        stats=optional("app_route", client.get_app_route_stats, []),
+        classes=optional("sla_classes", client.get_sla_classes, []),
+        events=optional(
+            "app_route_events",
+            lambda: client.get_app_route_events(config.ALARM_WINDOW_HOURS),
+            [],
+        ),
     )
     # Whether the SLA figures above can be trusted to describe the traffic they
     # claim to: that depends on enhanced AAR being configured, not just available.
     enhanced_aar = analysis.analyse_enhanced_aar(
         devices=devices_raw,
-        sla_definitions=client.get_sla_class_definitions(),
-        probe_classes=client.get_app_probe_classes(),
+        sla_definitions=optional(
+            "sla_definitions", client.get_sla_class_definitions, []
+        ),
+        probe_classes=optional(
+            "probe_classes", client.get_app_probe_classes, []
+        ),
     )
+
+    server = optional("server", client.get_server_info, {})
 
     report = health_mod.compute(
         devices=devices_raw, bfd=bfd, control=control, alarms=alarms_list
@@ -114,6 +149,17 @@ def collect(client) -> dict:
         "links": links,
         "aar": aar,
         "enhanced_aar": enhanced_aar,
+        "compat": {
+            # What this controller told us about itself, and which of our data
+            # sources it actually served. Asserted compatibility is worth less
+            # than what the live controller just did.
+            "platform_version": server.get("platformVersion"),
+            "tenancy_mode": server.get("tenancyMode"),
+            "capabilities": server.get("capabilities") or [],
+            "degraded": degraded,
+            "sources_total": len(compat.SOURCES),
+            "sources_degraded": len(degraded),
+        },
     }
 
 

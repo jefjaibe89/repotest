@@ -29,6 +29,7 @@ from flask import (
 )
 
 import auth
+import compat
 import config
 import i18n
 import poller
@@ -228,6 +229,7 @@ VIEWS = [
     {"endpoint": "view_qos", "label": "nav.qos"},
     {"endpoint": "view_links", "label": "nav.links"},
     {"endpoint": "view_aar", "label": "nav.aar"},
+    {"endpoint": "view_compat", "label": "nav.compat"},
 ]
 
 
@@ -373,6 +375,31 @@ def api_links():
 @auth.login_required
 def api_aar():
     return served("aar")
+
+
+@app.route("/compat")
+@auth.login_required
+def view_compat():
+    """What this controller served, against what the dashboard assumes."""
+    return _render_view("compat.html", "view_compat")
+
+
+@app.route("/api/compat")
+@auth.login_required
+def api_compat():
+    try:
+        payload, _ = _latest()
+    except LookupError as exc:
+        return jsonify({"error": "no_data", "message": str(exc)}), 503
+
+    live = payload.get("compat", {})
+    result = compat.summarise(live.get("degraded"))
+    result["controller"] = {
+        "platform_version": live.get("platform_version"),
+        "tenancy_mode": live.get("tenancy_mode"),
+        "capabilities": live.get("capabilities") or [],
+    }
+    return jsonify(result)
 
 
 @app.route("/api/enhanced-aar")

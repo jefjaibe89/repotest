@@ -321,22 +321,34 @@ def analyse_enhanced_aar(
     app-probe-class has to exist, and each SLA class has to reference one.
     Any of the three missing leaves some traffic measured by default probes.
     """
-    probes = {p.get("name"): p for p in probe_classes if p.get("name")}
+    # An SLA class references its app-probe-class by the probe list's listId
+    # UUID. Names are indexed too, because some vManage builds return the name
+    # in that field and resolving only by UUID would report a correctly
+    # configured fabric as broken.
+    probes_by_id = {str(p["list_id"]): p for p in probe_classes if p.get("list_id")}
+    probes_by_name = {p["name"]: p for p in probe_classes if p.get("name")}
 
     # --- per SLA class ---
     classes = []
     for definition in sla_definitions:
-        probe_name = definition.get("appProbeClass")
-        probe = probes.get(probe_name) if probe_name else None
+        reference = definition.get("app_probe_class")
+        probe = None
+        if reference is not None:
+            key = str(reference)
+            probe = probes_by_id.get(key) or probes_by_name.get(key)
+
         classes.append({
             "name": definition.get("name"),
-            "probe_class": probe_name,
+            # Show the operator the probe class's name, never a raw UUID.
+            "probe_class": (probe or {}).get("name") or (reference if probe else None),
             "enhanced": bool(probe),
-            # A binding that names a class which does not exist is worse than
+            # A binding pointing at a class that does not exist is worse than
             # no binding: it looks configured and measures nothing special.
-            "dangling": bool(probe_name) and probe is None,
+            "dangling": reference is not None and probe is None,
             "dscp": (probe or {}).get("dscp"),
-            "forwarding_class": (probe or {}).get("forwardingClass"),
+            "dscp_map": (probe or {}).get("dscp_map") or [],
+            "mixed_dscp": bool((probe or {}).get("mixed_dscp")),
+            "forwarding_class": (probe or {}).get("forwarding_class"),
             "latency": definition.get("latency"),
             "loss": definition.get("loss"),
             "jitter": definition.get("jitter"),
@@ -361,10 +373,11 @@ def analyse_enhanced_aar(
 
     enhanced = [c for c in classes if c["enhanced"]]
     blocking = [d for d in device_rows if not d["supported"]]
-    unused = [name for name, p in probes.items()
-              if not any(c["probe_class"] == name for c in classes)]
+    bound = {c["probe_class"] for c in classes if c["enhanced"]}
+    unused = [p["name"] for p in probe_classes
+              if p.get("name") and p["name"] not in bound]
 
-    if not probes:
+    if not probe_classes:
         state = "disabled"
     elif not enhanced:
         state = "disabled"
@@ -373,7 +386,7 @@ def analyse_enhanced_aar(
     else:
         state = "enabled"
 
-    findings = _enhanced_aar_findings(classes, blocking, unused, probes)
+    findings = _enhanced_aar_findings(classes, blocking, unused, probe_classes)
 
     return {
         "state": state,
@@ -383,7 +396,8 @@ def analyse_enhanced_aar(
             {
                 "name": p.get("name"),
                 "dscp": p.get("dscp"),
-                "forwarding_class": p.get("forwardingClass"),
+                "forwarding_class": p.get("forwarding_class"),
+                "dscp_map": p.get("dscp_map") or [],
                 "used_by": [c["name"] for c in classes if c["probe_class"] == p.get("name")],
             }
             for p in probe_classes
@@ -394,7 +408,7 @@ def analyse_enhanced_aar(
             "sla_enhanced": len(enhanced),
             "sla_default": len(classes) - len(enhanced),
             "coverage_pct": _pct(len(enhanced), len(classes)),
-            "probe_classes": len(probes),
+            "probe_classes": len(probe_classes),
             "devices_total": len(device_rows),
             "devices_supported": sum(1 for d in device_rows if d["supported"]),
             "devices_blocking": len(blocking),

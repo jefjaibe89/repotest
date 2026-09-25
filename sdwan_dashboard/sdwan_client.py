@@ -42,6 +42,78 @@ class SDWANConnectionError(SDWANError):
     """vManage was unreachable, timed out, or returned an unusable response."""
 
 
+# ------------------------------------------- policy list shapes
+# Verified against Cisco's catalystwan SDK models (AppProbeClassList,
+# SLAClassList, PolicyListBase/PolicyListInfo). A policy list carries its
+# payload inside `entries`, not as flat fields, and an SLA class references its
+# app-probe-class by the probe list's `listId` UUID rather than by name.
+#
+# Both readers also accept a flattened row, because some vManage builds return
+# summary views of these lists and being strict here would mean reporting a
+# correctly configured fabric as broken.
+
+def _first_entry(row: dict) -> dict:
+    """The single entry a policy list carries, or the row itself if flattened."""
+    entries = row.get("entries")
+    if isinstance(entries, list) and entries and isinstance(entries[0], dict):
+        return entries[0]
+    return row
+
+
+def normalise_probe_class(row: dict) -> dict:
+    """Flatten an app-probe-class list into the shape the dashboard uses.
+
+    DSCP is configured per TLOC colour, so a class can probe with different
+    markings on different transports. Those are kept, with a single value
+    surfaced only when the class is unambiguous.
+    """
+    entry = _first_entry(row)
+    mappings = [
+        {"color": m.get("color"), "dscp": m.get("dscp")}
+        for m in entry.get("map", []) or []
+        if isinstance(m, dict)
+    ]
+    distinct = sorted({m["dscp"] for m in mappings if m["dscp"] is not None})
+    single = entry.get("dscp")
+    if single is None and len(distinct) == 1:
+        single = distinct[0]
+
+    return {
+        "name": row.get("name"),
+        "list_id": row.get("listId"),
+        "forwarding_class": entry.get("forwardingClass"),
+        "dscp": single,
+        "dscp_map": mappings,
+        "mixed_dscp": len(distinct) > 1,
+        "reference_count": row.get("referenceCount"),
+    }
+
+
+def _as_number(value):
+    """SLA thresholds come back as strings; comparisons need numbers."""
+    if value is None or isinstance(value, (int, float)):
+        return value
+    try:
+        text = str(value).strip()
+        return float(text) if "." in text else int(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalise_sla_definition(row: dict) -> dict:
+    entry = _first_entry(row)
+    return {
+        "name": row.get("name"),
+        "list_id": row.get("listId"),
+        "latency": _as_number(entry.get("latency")),
+        "loss": _as_number(entry.get("loss")),
+        "jitter": _as_number(entry.get("jitter")),
+        # A UUID pointing at an app-probe-class list, not that list's name.
+        "app_probe_class": entry.get("appProbeClass"),
+        "fallback_best_tunnel": entry.get("fallbackBestTunnel"),
+    }
+
+
 def describe_key(exc: Exception) -> str | None:
     """Catalog key for a transport failure, so the UI can render it translated.
 
@@ -277,7 +349,7 @@ class SDWANClient:
         queue that DSCP lands in rather than the traffic the class governs.
         """
         data = self._get("/template/policy/list/appprobe")
-        return data.get("data", [])
+        return [normalise_probe_class(row) for row in data.get("data", [])]
 
     def get_sla_class_definitions(self) -> list[dict]:
         """SLA classes as configured, which carry the app-probe-class binding.
@@ -285,7 +357,31 @@ class SDWANClient:
         Distinct from get_sla_classes(), which reports operational state.
         """
         data = self._get("/template/policy/list/sla")
-        return data.get("data", [])
+        return [normalise_sla_definition(row) for row in data.get("data", [])]
+
+    def get_server_info(self) -> dict:
+        """vManage's own account of itself: version, tenancy and capabilities."""
+        data = self._get("/client/server")
+        return data.get("data", {}) or {}
+
+    def probe(self, path: str, method: str = "GET") -> dict:
+        """Call an endpoint just to see whether this controller has it.
+
+        Never raises: the point is to record what happened, including failure.
+        """
+        url = f"{self.base_url}/dataservice{path}"
+        try:
+            resp = self.session.request(method, url, timeout=self.timeout)
+        except requests.RequestException as exc:
+            return {"path": path, "ok": False, "status": None, "reason": describe(exc)}
+
+        ok = resp.status_code < 400
+        return {
+            "path": path,
+            "ok": ok,
+            "status": resp.status_code,
+            "reason": None if ok else f"HTTP {resp.status_code}",
+        }
 
     def get_app_route_events(self, hours: int = 24) -> list[dict]:
         """Path switchovers: when app-aware routing moved traffic, and why."""
@@ -444,6 +540,18 @@ class MockSDWANClient:
 
     def get_reachability_summary(self) -> dict:
         return {"reachable": 9, "unreachable": 2}
+
+    def get_server_info(self) -> dict:
+        """Shaped like the ServerInfo model in Cisco's catalystwan SDK."""
+        return {
+            "platformVersion": "20.12.1",
+            "tenancyMode": "SingleTenant",
+            "viewMode": "provider",
+            "capabilities": ["dashboard", "monitor", "configuration", "tools"],
+        }
+
+    def probe(self, path: str, method: str = "GET") -> dict:
+        return {"path": path, "ok": True, "status": 200, "reason": None}
 
     # ------------------------------------------------- tunnels and drill-down
     def get_tunnel_stats(self) -> list[dict]:
@@ -610,26 +718,68 @@ class MockSDWANClient:
             for host, local, remote_ip, remote_color, sla, lat, loss, jit, policy in rows
         ]
 
+    # Policy list identifiers, so the SLA→probe binding is by UUID here too.
+    _VOICE_PROBE_ID = "8f3c2a10-6b4e-4d21-9f77-1a2b3c4d5e6f"
+    _CRITICAL_PROBE_ID = "b1e4d7c2-3a95-4f08-8c6d-9e0f1a2b3c4d"
+
     def get_app_probe_classes(self) -> list[dict]:
-        """A partially rolled out enhanced AAR: two classes probed, one not."""
-        return [
-            {"name": "VOICE-PROBE", "forwardingClass": "voice",
-             "dscp": 46, "referenceCount": 1},
-            {"name": "CRITICAL-PROBE", "forwardingClass": "critical-data",
-             "dscp": 34, "referenceCount": 1},
+        """A partially rolled out enhanced AAR: two classes probed, one not.
+
+        Shaped the way vManage returns a policy list — payload under `entries`,
+        DSCP mapped per TLOC colour — and run through the same normaliser the
+        live client uses, so the demo exercises the real parsing path.
+        """
+        raw = [
+            {
+                "name": "VOICE-PROBE", "type": "appProbe",
+                "listId": self._VOICE_PROBE_ID, "referenceCount": 1,
+                "entries": [{
+                    "forwardingClass": "voice",
+                    "map": [
+                        {"color": "mpls", "dscp": 46},
+                        {"color": "biz-internet", "dscp": 46},
+                    ],
+                }],
+            },
+            {
+                "name": "CRITICAL-PROBE", "type": "appProbe",
+                "listId": self._CRITICAL_PROBE_ID, "referenceCount": 1,
+                "entries": [{
+                    "forwardingClass": "critical-data",
+                    "map": [
+                        {"color": "mpls", "dscp": 34},
+                        {"color": "biz-internet", "dscp": 34},
+                    ],
+                }],
+            },
         ]
+        return [normalise_probe_class(row) for row in raw]
 
     def get_sla_class_definitions(self) -> list[dict]:
-        return [
-            {"name": "VOICE-SLA", "latency": 50, "loss": 1.0, "jitter": 20,
-             "appProbeClass": "VOICE-PROBE"},
-            {"name": "CRITICAL-SLA", "latency": 150, "loss": 2.0, "jitter": 50,
-             "appProbeClass": "CRITICAL-PROBE"},
+        """Thresholds arrive as strings and the probe binding as a UUID."""
+        raw = [
+            {
+                "name": "VOICE-SLA", "type": "sla",
+                "listId": "11111111-1111-4111-8111-111111111111",
+                "entries": [{"latency": "50", "loss": "1", "jitter": "20",
+                             "appProbeClass": self._VOICE_PROBE_ID}],
+            },
+            {
+                "name": "CRITICAL-SLA", "type": "sla",
+                "listId": "22222222-2222-4222-8222-222222222222",
+                "entries": [{"latency": "150", "loss": "2", "jitter": "50",
+                             "appProbeClass": self._CRITICAL_PROBE_ID}],
+            },
             # No probe class: measured with the default DSCP, so its figures
             # describe the default queue rather than bulk traffic.
-            {"name": "BULK-SLA", "latency": 300, "loss": 5.0, "jitter": 100,
-             "appProbeClass": None},
+            {
+                "name": "BULK-SLA", "type": "sla",
+                "listId": "33333333-3333-4333-8333-333333333333",
+                "entries": [{"latency": "300", "loss": "5", "jitter": "100",
+                             "appProbeClass": None}],
+            },
         ]
+        return [normalise_sla_definition(row) for row in raw]
 
     def get_app_route_events(self, hours: int = 24) -> list[dict]:
         """Recent path switchovers, newest first."""
