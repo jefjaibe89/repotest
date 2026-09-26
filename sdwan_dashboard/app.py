@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import os
+import secrets
 import threading
 import time
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ from flask import (
 import auth
 import compat
 import config
+import metrics
 import i18n
 import poller
 import store
@@ -158,6 +160,47 @@ def set_language(code):
             samesite="Lax",
             secure=config.SESSION_COOKIE_SECURE,
         )
+    return response
+
+
+# --------------------------------------------------------- security headers
+@app.before_request
+def _csp_nonce():
+    """A fresh nonce per response, so the page's own inline script can run
+    while an injected one cannot — injected markup has no way to guess it."""
+    g.csp_nonce = secrets.token_urlsafe(16)
+
+
+@app.context_processor
+def _inject_nonce():
+    return {"csp_nonce": getattr(g, "csp_nonce", "")}
+
+
+@app.after_request
+def _security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+
+    if not config.CSP_ENABLED:
+        return response
+
+    nonce = getattr(g, "csp_nonce", "")
+    response.headers.setdefault("Content-Security-Policy", "; ".join([
+        "default-src 'self'",
+        f"script-src 'self' 'nonce-{nonce}'",
+        # Style needs 'unsafe-inline': the panels set colours and bar widths
+        # through style attributes from live data. Injected CSS cannot execute,
+        # so this is a far smaller concession than allowing inline script.
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data:",      # the favicon is a data: URI
+        "font-src 'self'",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    ]))
     return response
 
 
@@ -403,6 +446,35 @@ def api_compat():
     return jsonify(result)
 
 
+@app.route("/metrics")
+def prometheus_metrics():
+    """Prometheus exposition of the last poll.
+
+    Deliberately outside the session login: a scraper has no session. When
+    METRICS_TOKEN is set it is required as a bearer token instead.
+    """
+    if not config.METRICS_ENABLED:
+        return jsonify({"error": "disabled", "message": "Metrics are not enabled"}), 404
+
+    if not metrics.authorised(request.headers.get("Authorization")):
+        return Response("unauthorized\n", status=401,
+                        headers={"WWW-Authenticate": "Bearer"})
+
+    record = store.get_latest()
+    if record is None or not record["payload"]:
+        # Report the collector as down rather than 404: a scraper needs a
+        # series it can alert on, not a gap it has to interpret.
+        return Response("sdwan_up 0\n", content_type=metrics.CONTENT_TYPE)
+
+    meta = {
+        "age_seconds": round(time.time() - record["fetched_at"], 1),
+        "error": record["error"],
+        "consecutive_failures": record["consecutive_failures"],
+    }
+    return Response(metrics.render(record["payload"], meta),
+                    content_type=metrics.CONTENT_TYPE)
+
+
 @app.route("/api/enhanced-aar")
 @auth.login_required
 def api_enhanced_aar():
@@ -493,6 +565,12 @@ def bootstrap():
             "VMANAGE_VERIFY_SSL is off: vManage credentials are sent over a TLS "
             "connection whose certificate is not checked. Point it at the CA "
             "bundle that issued the controller's certificate instead."
+        )
+
+    if config.METRICS_ENABLED and not config.METRICS_TOKEN:
+        log.warning(
+            "/metrics is enabled without METRICS_TOKEN: the network inventory "
+            "is exposed to anything that can reach this port."
         )
 
     if auth.enabled() and not os.getenv("SECRET_KEY"):

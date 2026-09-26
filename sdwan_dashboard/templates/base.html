@@ -88,7 +88,7 @@
   {{ t("footer.refresh", seconds=refresh_interval) }}
 </footer>
 
-<script>
+<script nonce="{{ csp_nonce }}">
   const REFRESH_INTERVAL = {{ refresh_interval }} * 1000;
   // The panels are built in the browser, so the strings travel with the page
   // rather than being fetched — the dashboard has to work without egress.

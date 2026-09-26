@@ -111,6 +111,7 @@ Every endpoint returns JSON and is safe to scrape from another tool.
 | `GET /api/status` | Poller freshness: age, staleness, last error |
 | `GET /api/export/devices.csv` | Inventory as a CSV download |
 | `GET /healthz` | Liveness probe |
+| `GET /metrics` | Prometheus exposition (off by default) |
 
 Panel responses carry `X-Data-Age` and `X-Data-Stale` headers. Before the first poll completes, endpoints return `503`; a vManage failure during drill-down returns `502` with a readable reason:
 
@@ -142,6 +143,9 @@ All settings are environment variables; see `.env.example` for the full list.
 | `ALERTS_ENABLED` | `false` | Needs a webhook URL as well |
 | `ALERT_COOLDOWN_SECONDS` | `3600` | Before re-announcing an ongoing problem |
 | `DASHBOARD_PASSWORD` | — | Empty means no login |
+| `METRICS_ENABLED` | `false` | Serve `/metrics` for Prometheus |
+| `METRICS_TOKEN` | — | Bearer token required to scrape, when set |
+| `CSP_ENABLED` | `true` | Content Security Policy header |
 
 ---
 
@@ -160,6 +164,8 @@ All settings are environment variables; see `.env.example` for the full list.
 **No CDN.** Chart.js is vendored under `static/vendor/`. SD-WAN management networks are routinely air-gapped, and a dashboard that renders blank without internet egress is useless in exactly the environment it is built for.
 
 **One failing panel does not blank the page.** The browser refreshes panels with `Promise.allSettled`, so a single failing endpoint leaves the rest on screen.
+
+**It feeds the monitoring you already have.** `/metrics` exposes the fabric score, per-device CPU and memory, link utilisation, QoS drops and SLA compliance in Prometheus format, so the fabric shows up in the Grafana a NOC already watches instead of being one more screen. `sdwan_up` and `sdwan_poll_age_seconds` are reported separately from fabric health, so a stopped collector can be alerted on distinctly from a degraded network.
 
 **Errors stay readable.** Transport exceptions are translated before they reach the operator — "the host is unreachable or refused the connection", not a urllib3 object address.
 

@@ -92,3 +92,16 @@ LOGIN_ATTEMPT_WINDOW_SECONDS = int(os.getenv("LOGIN_ATTEMPT_WINDOW_SECONDS", "90
 # Only enable behind a proxy you control: it makes the throttle trust
 # X-Forwarded-For, which clients can otherwise forge to evade the limit.
 TRUST_PROXY_HEADERS = _flag("TRUST_PROXY_HEADERS")
+
+# ---- Prometheus ------------------------------------------------------------
+# Off by default: the metrics carry the same network inventory the dashboard
+# shows, so exposing them is a deliberate choice.
+METRICS_ENABLED = _flag("METRICS_ENABLED")
+# A scraper cannot log in through a session, so the login cannot protect this
+# endpoint. Set a token and scrape with "Authorization: Bearer <token>".
+METRICS_TOKEN = os.getenv("METRICS_TOKEN", "")
+
+# ---- Content Security Policy -----------------------------------------------
+# Defence in depth under the output escaping: if a future view introduces an
+# unescaped sink, this is what stops the injected script from running.
+CSP_ENABLED = _flag("CSP_ENABLED", "true")
