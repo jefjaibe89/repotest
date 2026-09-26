@@ -44,6 +44,74 @@
     <p class="eaar-why">{{ t("compat.disclaimer") }}</p>
   </section>
 
+  <!-- ---- Release consistency across every node ---- -->
+  <section class="eaar-card" id="fabric-card">
+    <div class="eaar-head">
+      <div class="eaar-verdict">
+        <span class="eaar-state" id="fabric-state">—</span>
+        <span class="eaar-label">{{ t("fabric.title") }}</span>
+      </div>
+      <div class="eaar-stats">
+        <span class="eaar-stat"><strong id="fabric-control">—</strong> {{ t("fabric.control_plane") }}</span>
+        <span class="eaar-stat"><strong id="fabric-edges">—</strong> {{ t("fabric.edges") }}</span>
+        <span class="eaar-stat"><strong id="fabric-versions">—</strong> {{ t("fabric.distinct_versions") }}</span>
+      </div>
+    </div>
+
+    <p class="eaar-desc" id="fabric-desc">{{ t("common.loading") }}</p>
+    <p class="eaar-why">{{ t("fabric.subtitle") }} {{ t("fabric.guidance") }}</p>
+
+    <div class="eaar-grid">
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("fabric.per_role") }}</p>
+        <div class="table-scroll">
+          <table class="data-table compact">
+            <thead>
+              <tr>
+                <th>{{ t("fabric.role") }}</th>
+                <th>{{ t("fabric.nodes") }}</th>
+                <th>{{ t("fabric.versions") }}</th>
+                <th>{{ t("fabric.consistent_col") }}</th>
+              </tr>
+            </thead>
+            <tbody id="fabric-role-tbody">
+              <tr><td colspan="4" class="loading-cell">{{ t("common.loading") }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("eaar.what_to_do") }}</p>
+        <div id="fabric-findings" class="findings-list">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Every node ---- -->
+  <section class="table-card">
+    <div class="card-header"><h3>{{ t("fabric.all_nodes") }}</h3></div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("devices.hostname") }}</th>
+            <th>{{ t("fabric.role") }}</th>
+            <th>{{ t("devices.system_ip") }}</th>
+            <th>{{ t("devices.site") }}</th>
+            <th>{{ t("devices.version") }}</th>
+            <th>{{ t("devices.status") }}</th>
+          </tr>
+        </thead>
+        <tbody id="fabric-node-tbody">
+          <tr><td colspan="6" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="table-card">
     <div class="card-header">
       <h3>{{ t("compat.sources") }}</h3>

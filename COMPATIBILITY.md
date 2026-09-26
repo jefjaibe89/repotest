@@ -102,6 +102,29 @@ None of the four catalogued endpoints carries a `@versions` constraint in the
 SDK, so it gave no evidence either way for these floors. Confirm them against
 your own release notes before relying on them.
 
+### Consistency across the fabric
+
+The feature floors above judge one node at a time. Separately, every node's
+release is compared against the rest, because the fabric has to agree with
+itself.
+
+Cisco pairs the two trains by minor release — controller 20.12 ships with
+IOS XE SD-WAN 17.12 — which is the only way to compare a Manager against an
+edge, since 20.x and 17.x cannot be compared as numbers. That pairing comes
+from the release numbering convention, not from a compatibility matrix, so it
+is reported as guidance rather than as a support verdict.
+
+| Situation | Reported as |
+|---|---|
+| An edge ahead of the control plane | Critical — controllers are upgraded first |
+| Control-plane nodes split across releases | Major — expected mid-upgrade, a problem if settled |
+| Nodes of one role disagreeing (a Manager cluster) | Major |
+| An edge more than three releases behind | Minor |
+| A node reporting no usable release | Minor |
+
+The lowest control-plane release is the ceiling, not the average: one lagging
+Controller constrains the whole fabric.
+
 ### Trains the floor table does not know
 
 A version table is written once and the software keeps shipping, so an

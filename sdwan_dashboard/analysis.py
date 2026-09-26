@@ -325,6 +325,171 @@ def supports_enhanced_aar(raw: str | None) -> tuple[bool, str | None]:
     return padded[:len(floor)] >= floor, ".".join(str(n) for n in floor)
 
 
+# ------------------------------------------------------- fabric versions
+# Cisco pairs the two trains by minor release: controller 20.12 goes with
+# IOS XE SD-WAN 17.12, 20.9 with 17.9, and so on. That pairing is the only way
+# to compare a Manager against an edge, since 20.x and 17.x are not comparable
+# as numbers.
+#
+# Taken from the release numbering convention rather than verified against a
+# compatibility matrix, so it is reported as guidance and not as a verdict on
+# whether a combination is supported.
+PAIRED_TRAINS = {20: "control", 17: "edge"}
+
+# The control plane is expected to be at or ahead of the edges. Edges running
+# further behind than this are worth naming: interoperability windows are
+# finite and an edge left far back stops receiving features the controllers
+# already expect.
+EDGE_LAG_WARN = 3
+
+
+def release_number(raw: str | None) -> int | None:
+    """The minor release that lets a 20.x controller be compared to a 17.x edge."""
+    version = parse_version(raw)
+    if version is None or len(version) < 2:
+        return None
+    return version[1] if version[0] in PAIRED_TRAINS else None
+
+
+def analyse_fabric_versions(devices: list[dict]) -> dict:
+    """Check every node's release, not just the ones a feature happens to need.
+
+    Enhanced AAR only cares about edges and the endpoint audit only sees the
+    Manager it connects to, so nothing was looking at the controllers, the
+    validators, the other nodes of a Manager cluster, or whether the fabric
+    agrees with itself about which release it is on.
+    """
+    nodes = []
+    for d in devices:
+        role = sdwan_client.device_role(d.get("device-type"))
+        raw = d.get("version")
+        nodes.append({
+            "hostname": d.get("host-name"),
+            "system_ip": d.get("system-ip"),
+            "site_id": d.get("site-id"),
+            "role": role,
+            "version": raw,
+            "release": release_number(raw),
+            "reachable": d.get("reachability") == "reachable",
+        })
+
+    control_roles = ("manager", "controller", "validator")
+    control = [n for n in nodes if n["role"] in control_roles]
+    edges = [n for n in nodes if n["role"] == "edge"]
+
+    by_role = {}
+    for role in ("manager", "controller", "validator", "edge"):
+        members = [n for n in nodes if n["role"] == role]
+        versions = sorted({n["version"] for n in members if n["version"]})
+        by_role[role] = {
+            "role": role,
+            "count": len(members),
+            "versions": versions,
+            "consistent": len(versions) <= 1,
+            "nodes": members,
+        }
+
+    control_releases = sorted({n["release"] for n in control if n["release"] is not None})
+    # The lowest control-plane release is what an edge has to stay at or under:
+    # one lagging controller constrains the whole fabric.
+    control_floor = control_releases[0] if control_releases else None
+
+    findings = _fabric_version_findings(by_role, control_releases, control_floor, edges, nodes)
+
+    if any(f["severity"] == "Critical" for f in findings):
+        state = "unsupported"
+    elif findings:
+        state = "skewed"
+    elif not control:
+        state = "unknown"
+    else:
+        state = "consistent"
+
+    return {
+        "state": state,
+        "nodes": sorted(nodes, key=lambda n: (n["role"] or "zz", n["hostname"] or "")),
+        "by_role": by_role,
+        "control_releases": control_releases,
+        "control_floor": control_floor,
+        "findings": findings,
+        "totals": {
+            "nodes": len(nodes),
+            "control_plane": len(control),
+            "edges": len(edges),
+            "distinct_versions": len({n["version"] for n in nodes if n["version"]}),
+            "unreadable": sum(1 for n in nodes if not n["release"]),
+        },
+    }
+
+
+def _fabric_version_findings(by_role, control_releases, control_floor, edges, nodes):
+    findings = []
+
+    # An edge ahead of the control plane is the one combination Cisco's
+    # upgrade order rules out: controllers are meant to go first.
+    if control_floor is not None:
+        for edge in edges:
+            if edge["release"] is not None and edge["release"] > control_floor:
+                findings.append({
+                    "severity": "Critical",
+                    "key": "fabric.finding.edge_ahead",
+                    "params": {
+                        "host": edge["hostname"],
+                        "version": edge["version"],
+                        "control": control_floor,
+                    },
+                })
+
+    # Mixed releases across the control plane: normal mid-upgrade, a problem
+    # if it is where the fabric has settled.
+    if len(control_releases) > 1:
+        findings.append({
+            "severity": "Major",
+            "key": "fabric.finding.control_plane_split",
+            "params": {"releases": ", ".join(f"20.{r}" for r in control_releases)},
+        })
+
+    for role in ("manager", "controller", "validator"):
+        entry = by_role[role]
+        if entry["count"] > 1 and not entry["consistent"]:
+            findings.append({
+                "severity": "Major",
+                "key": "fabric.finding.role_mixed",
+                "params": {"role": role, "versions": ", ".join(entry["versions"])},
+            })
+
+    if control_floor is not None:
+        for edge in edges:
+            if edge["release"] is None:
+                continue
+            gap = control_floor - edge["release"]
+            if gap >= EDGE_LAG_WARN:
+                findings.append({
+                    "severity": "Minor",
+                    "key": "fabric.finding.edge_lagging",
+                    "params": {
+                        "host": edge["hostname"],
+                        "version": edge["version"],
+                        "gap": gap,
+                    },
+                })
+
+    for node in nodes:
+        if node["release"] is None:
+            findings.append({
+                "severity": "Minor",
+                "key": "fabric.finding.version_unreadable",
+                "params": {
+                    "host": node["hostname"] or "—",
+                    "version": node["version"] or "—",
+                },
+            })
+
+    order = {"Critical": 0, "Major": 1, "Minor": 2}
+    findings.sort(key=lambda f: order.get(f["severity"], 9))
+    return findings
+
+
 def version_status(raw: str | None) -> str:
     """How the verdict on this release was reached, for honest reporting.
 

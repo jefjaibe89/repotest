@@ -104,6 +104,9 @@ def collect(client) -> dict:
         ),
     )
 
+    # Every node's release, not just the ones a feature happens to need.
+    fabric_versions = analysis.analyse_fabric_versions(devices_raw)
+
     server = optional("server", client.get_server_info, {})
 
     report = health_mod.compute(
@@ -150,6 +153,7 @@ def collect(client) -> dict:
         "links": links,
         "aar": aar,
         "enhanced_aar": enhanced_aar,
+        "fabric_versions": fabric_versions,
         "compat": {
             # What this controller told us about itself, and which of our data
             # sources it actually served. Asserted compatibility is worth less

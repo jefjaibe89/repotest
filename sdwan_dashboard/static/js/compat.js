@@ -82,4 +82,79 @@ function renderSources(sources) {
   }).join("");
 }
 
-startAutoRefresh([loadCompat]);
+// ------------------------------------------------- release consistency
+const FABRIC_COLORS = {
+  consistent: GREEN, skewed: ORANGE, unsupported: RED, unknown: DIM,
+};
+
+async function loadFabricVersions() {
+  const d = await fetchJSON("/api/fabric-versions");
+  const color = FABRIC_COLORS[d.state] || DIM;
+
+  const state = document.getElementById("fabric-state");
+  state.textContent = t("fabric.state." + d.state);
+  state.style.color = color;
+  document.getElementById("fabric-card").style.borderLeftColor = color;
+  document.getElementById("fabric-desc").textContent = t("fabric.desc." + d.state);
+
+  document.getElementById("fabric-control").textContent = d.totals.control_plane;
+  document.getElementById("fabric-edges").textContent = d.totals.edges;
+  document.getElementById("fabric-versions").textContent = d.totals.distinct_versions;
+
+  renderRoleRows(d.by_role);
+  renderNodeRows(d.nodes);
+  renderFabricFindings(d.findings);
+}
+
+function renderRoleRows(byRole) {
+  const tbody = document.getElementById("fabric-role-tbody");
+  const rows = Object.values(byRole).filter(r => r.count > 0);
+  if (!rows.length) {
+    tbody.innerHTML = emptyRow(4, t("common.no_data"));
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `<tr class="${r.consistent ? "" : "row-alert"}">
+    <td style="font-weight:600">${esc(tRole(r.role))}</td>
+    <td class="mono-cell">${esc(r.count)}</td>
+    <td class="mono-cell">${esc(r.versions.join(", ") || "—")}</td>
+    <td>${r.consistent
+      ? `<span class="pill pill-ok">${esc(t("fabric.yes"))}</span>`
+      : `<span class="pill pill-warning">${esc(t("fabric.no"))}</span>`}</td>
+  </tr>`).join("");
+}
+
+function renderNodeRows(nodes) {
+  const tbody = document.getElementById("fabric-node-tbody");
+  if (!nodes.length) {
+    tbody.innerHTML = emptyRow(6, t("common.no_data"));
+    return;
+  }
+  tbody.innerHTML = nodes.map(n => `<tr>
+    <td style="font-weight:600">${esc(n.hostname)}</td>
+    <td><span class="type-chip type-${esc(n.role || "unknown")}"
+             title="${esc(roleLegacy(n.role))}">${esc(tRole(n.role, true))}</span></td>
+    <td class="mono-cell">${esc(n.system_ip)}</td>
+    <td class="mono-cell">${esc(n.site_id)}</td>
+    <td class="mono-cell">${esc(n.version || "—")}</td>
+    <td>${n.reachable
+      ? `<span class="pill pill-ok">${esc(t("devices.reachable"))}</span>`
+      : `<span class="pill pill-critical">${esc(t("devices.unreachable"))}</span>`}</td>
+  </tr>`).join("");
+}
+
+function renderFabricFindings(findings) {
+  const wrap = document.getElementById("fabric-findings");
+  if (!findings.length) {
+    wrap.innerHTML = `<div class="finding-all-clear">✓ ${esc(t("fabric.desc.consistent"))}</div>`;
+    return;
+  }
+  wrap.innerHTML = findings.map(f => {
+    const color = SEV_COLORS[f.severity] || DIM;
+    return `<div class="finding-item">
+      <span class="finding-dot" style="background:${color}"></span>
+      <span>${esc(t(f.key, f.params))}</span>
+    </div>`;
+  }).join("");
+}
+
+startAutoRefresh([loadCompat, loadFabricVersions]);

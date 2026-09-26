@@ -475,6 +475,13 @@ def prometheus_metrics():
                     content_type=metrics.CONTENT_TYPE)
 
 
+@app.route("/api/fabric-versions")
+@auth.login_required
+def api_fabric_versions():
+    """Release consistency across every node, by role."""
+    return served("fabric_versions")
+
+
 @app.route("/api/enhanced-aar")
 @auth.login_required
 def api_enhanced_aar():
