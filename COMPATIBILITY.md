@@ -102,6 +102,36 @@ None of the four catalogued endpoints carries a `@versions` constraint in the
 SDK, so it gave no evidence either way for these floors. Confirm them against
 your own release notes before relying on them.
 
+### Deployment scenario
+
+A Manager runs either standalone or clustered, and the two are judged by
+different rules. The mode comes from `GET /clusterManagement/tenancy/mode`
+(`deploymentmode`, `clusterid`) and per-node service state from
+`GET /clusterManagement/vManage/details/{ip}` — both catalogued endpoints, and
+both verified against Cisco's `TenancyMode` and `VManageDetails` models.
+
+**Standalone** has no quorum to maintain, so none of the cluster rules apply.
+The single point of failure is stated as information, not as a fault: running
+one node is a choice, and reporting a correct deployment as degraded would be
+crying wolf.
+
+**Cluster** is checked against:
+
+| Requirement | Reported as |
+|---|---|
+| At least three nodes | Critical — two cannot form a majority |
+| An odd node count | Major — an even split leaves neither side with quorum |
+| `configuration-db` on exactly three nodes | Critical when fewer, Major when more |
+| `application-server` and `messaging-server` on every node | Major |
+| Every Manager node reachable | Critical |
+
+When the controller's declared mode and the inventory disagree — a node
+removed from the cluster but still listed, for instance — that disagreement is
+reported rather than one of them being picked silently.
+
+Controller and Validator redundancy is checked in both scenarios: a single one
+of either is a Major finding, since losing it takes that function with it.
+
 ### Consistency across the fabric
 
 The feature floors above judge one node at a time. Separately, every node's

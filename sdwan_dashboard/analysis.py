@@ -325,6 +325,237 @@ def supports_enhanced_aar(raw: str | None) -> tuple[bool, str | None]:
     return padded[:len(floor)] >= floor, ".".join(str(n) for n in floor)
 
 
+# ---------------------------------------------------------- deployment
+# A Manager runs either standalone or clustered, and the two are judged by
+# different rules — a single node is a deliberate choice, whereas two nodes
+# cannot form quorum and is a broken cluster rather than a small one.
+#
+# Cluster requirements encoded here:
+#   - at least three nodes, because quorum needs a majority
+#   - an odd count, so a partition always leaves one side with a majority
+#   - configuration-db on exactly three nodes, which is where its quorum lives
+#
+# The services come from Cisco's VManageDetails model: application-server,
+# configuration-db, messaging-server and statistics-db.
+CLUSTER_MIN_NODES = 3
+CONFIG_DB_NODES = 3
+MANAGER_SERVICES = (
+    "application-server",
+    "configuration-db",
+    "messaging-server",
+    "statistics-db",
+)
+# Services expected on every node of a cluster; configuration-db is the
+# exception, being limited to three by design.
+SERVICES_ON_EVERY_NODE = ("application-server", "messaging-server")
+
+
+def analyse_deployment(
+    devices: list[dict],
+    tenancy: dict | None = None,
+    manager_services: dict[str, list[dict]] | None = None,
+) -> dict:
+    """Work out which deployment this is, then judge it by that scenario's rules."""
+    tenancy = tenancy or {}
+    manager_services = manager_services or {}
+
+    def of_role(role):
+        return [d for d in devices if sdwan_client.device_role(d.get("device-type")) == role]
+
+    managers = of_role("manager")
+    controllers = of_role("controller")
+    validators = of_role("validator")
+
+    # What the controller says, and what the inventory shows. They can disagree
+    # — a node removed from the cluster but still in the inventory, say — and
+    # the disagreement is worth reporting rather than silently picking one.
+    declared = (tenancy.get("deploymentmode") or "").strip().lower() or None
+    cluster_id = tenancy.get("clusterid") or None
+    observed = _observed_mode(len(managers))
+    mode = declared if declared in ("standalone", "cluster") else observed
+
+    nodes = []
+    for d in managers:
+        ip = d.get("system-ip")
+        services = manager_services.get(ip) or []
+        nodes.append({
+            "hostname": d.get("host-name"),
+            "system_ip": ip,
+            "version": d.get("version"),
+            "reachable": d.get("reachability") == "reachable",
+            "services": [
+                {
+                    "service": s.get("service"),
+                    "enabled": bool(s.get("enabled")),
+                    "status": s.get("status"),
+                    "healthy": bool(s.get("enabled"))
+                    and str(s.get("status", "")).lower() in ("running", "up", "active"),
+                }
+                for s in services
+            ],
+        })
+
+    service_counts = {name: 0 for name in MANAGER_SERVICES}
+    for node in nodes:
+        for svc in node["services"]:
+            if svc["service"] in service_counts and svc["healthy"]:
+                service_counts[svc["service"]] += 1
+
+    roles = {
+        "manager": _role_state("manager", managers, redundant_at=CLUSTER_MIN_NODES),
+        "controller": _role_state("controller", controllers, redundant_at=2),
+        "validator": _role_state("validator", validators, redundant_at=2),
+    }
+
+    findings = _deployment_findings(
+        mode, declared, observed, managers, nodes, service_counts, roles
+    )
+
+    actionable = [f for f in findings if f["severity"] != "Info"]
+    if not managers:
+        # Nothing to judge: without a Manager there is no deployment, and
+        # saying "degraded" about whatever else is missing would be a verdict
+        # on a scenario that was never observed.
+        health = "unknown"
+    elif any(f["severity"] == "Critical" for f in actionable):
+        health = "broken"
+    elif actionable:
+        health = "degraded"
+    else:
+        health = "healthy"
+
+    return {
+        "mode": mode or "unknown",
+        "declared_mode": declared,
+        "observed_mode": observed,
+        "health": health,
+        "cluster_id": cluster_id,
+        "tenancy": tenancy.get("mode"),
+        "domain": tenancy.get("domain"),
+        "nodes": nodes,
+        "service_counts": service_counts,
+        "roles": roles,
+        "findings": findings,
+        "totals": {
+            "managers": len(managers),
+            "controllers": len(controllers),
+            "validators": len(validators),
+            "managers_reachable": sum(1 for n in nodes if n["reachable"]),
+            "services_reported": sum(len(n["services"]) for n in nodes),
+        },
+    }
+
+
+def _observed_mode(manager_count: int) -> str | None:
+    if manager_count == 0:
+        return None
+    if manager_count == 1:
+        return "standalone"
+    return "cluster"
+
+
+def _role_state(role: str, members: list[dict], redundant_at: int) -> dict:
+    reachable = sum(1 for d in members if d.get("reachability") == "reachable")
+    return {
+        "role": role,
+        "count": len(members),
+        "reachable": reachable,
+        "redundant": len(members) >= redundant_at,
+        "redundant_at": redundant_at,
+    }
+
+
+def _deployment_findings(mode, declared, observed, managers, nodes, service_counts, roles):
+    findings = []
+    count = len(managers)
+
+    if declared and observed and declared != observed:
+        findings.append({
+            "severity": "Major",
+            "key": "deploy.finding.mode_mismatch",
+            "params": {"declared": declared, "observed": observed, "count": count},
+        })
+
+    if mode == "cluster":
+        # Two nodes is the dangerous case: it looks like a cluster and cannot
+        # form a majority, so losing either one loses the whole thing.
+        if count < CLUSTER_MIN_NODES:
+            findings.append({
+                "severity": "Critical",
+                "key": "deploy.finding.no_quorum",
+                "params": {"count": count, "minimum": CLUSTER_MIN_NODES},
+            })
+        elif count % 2 == 0:
+            findings.append({
+                "severity": "Major",
+                "key": "deploy.finding.even_nodes",
+                "params": {"count": count},
+            })
+
+        db_nodes = service_counts.get("configuration-db", 0)
+        if count >= CLUSTER_MIN_NODES and db_nodes != CONFIG_DB_NODES:
+            findings.append({
+                "severity": "Critical" if db_nodes < CONFIG_DB_NODES else "Major",
+                "key": "deploy.finding.config_db_count",
+                "params": {"running": db_nodes, "expected": CONFIG_DB_NODES},
+            })
+
+        for service in SERVICES_ON_EVERY_NODE:
+            running = service_counts.get(service, 0)
+            if nodes and running < count:
+                findings.append({
+                    "severity": "Major",
+                    "key": "deploy.finding.service_missing",
+                    "params": {"service": service, "running": running, "nodes": count},
+                })
+
+    elif mode == "standalone":
+        # Not a fault — a deliberate choice — but the consequence is worth
+        # stating, because it is invisible until the node is gone.
+        # Informational, not a fault: running one node is a choice, and the
+        # consequence is only worth stating because it is invisible until the
+        # node is gone. It must not make a correct deployment read as degraded.
+        findings.append({
+            "severity": "Info",
+            "key": "deploy.finding.standalone_single_point",
+            "params": {},
+        })
+
+    for node in nodes:
+        if not node["reachable"]:
+            findings.append({
+                "severity": "Critical",
+                "key": "deploy.finding.manager_unreachable",
+                "params": {"host": node["hostname"]},
+            })
+        unhealthy = [s["service"] for s in node["services"] if not s["healthy"]]
+        if unhealthy:
+            findings.append({
+                "severity": "Major",
+                "key": "deploy.finding.node_service_down",
+                "params": {"host": node["hostname"], "services": ", ".join(unhealthy)},
+            })
+
+    for role in ("controller", "validator"):
+        state = roles[role]
+        if state["count"] and not state["redundant"]:
+            findings.append({
+                "severity": "Major",
+                "key": "deploy.finding.no_redundancy",
+                "params": {"role": role, "count": state["count"]},
+            })
+        elif state["count"] == 0:
+            findings.append({
+                "severity": "Major",
+                "key": "deploy.finding.role_absent",
+                "params": {"role": role},
+            })
+
+    order = {"Critical": 0, "Major": 1, "Minor": 2, "Info": 3}
+    findings.sort(key=lambda f: order.get(f["severity"], 9))
+    return findings
+
+
 # ------------------------------------------------------- fabric versions
 # Cisco pairs the two trains by minor release: controller 20.12 goes with
 # IOS XE SD-WAN 17.12, 20.9 with 17.9, and so on. That pairing is the only way

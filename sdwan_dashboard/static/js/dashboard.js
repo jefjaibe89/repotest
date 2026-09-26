@@ -101,7 +101,7 @@ function renderFindings(findings) {
     const color = SEV_COLORS[f.severity] || SEV_COLORS.Info;
     // Findings carry a key so they render in this viewer's language. Ones
     // sourced from a controller alarm have no key and keep vManage's wording.
-    const text = f.key ? t(f.key, f.params) : f.message;
+    const text = f.key ? t(f.key, localiseParams(f.params)) : f.message;
     return `<div class="finding-item">
       <span class="finding-dot" style="background:${color}"></span>
       <span>${esc(text)}</span>

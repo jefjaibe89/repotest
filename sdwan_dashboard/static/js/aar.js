@@ -103,7 +103,7 @@ function renderEaarFindings(findings) {
     const color = SEV_COLORS[f.severity] || DIM;
     return `<div class="finding-item">
       <span class="finding-dot" style="background:${color}"></span>
-      <span>${esc(t(f.key, f.params))}</span>
+      <span>${esc(t(f.key, localiseParams(f.params)))}</span>
     </div>`;
   }).join("");
 }

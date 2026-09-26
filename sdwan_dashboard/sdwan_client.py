@@ -395,9 +395,26 @@ class SDWANClient:
         return [normalise_sla_definition(row) for row in data.get("data", [])]
 
     def get_server_info(self) -> dict:
-        """vManage's own account of itself: version, tenancy and capabilities."""
+        """The Manager's own account of itself: version, tenancy, capabilities."""
         data = self._get("/client/server")
         return data.get("data", {}) or {}
+
+    def get_tenancy_mode(self) -> dict:
+        """Deployment mode and cluster identity, straight from the controller.
+
+        Shape verified against Cisco's TenancyMode model: mode (SingleTenant /
+        MultiTenant), deploymentmode, domain and clusterid.
+        """
+        data = self._get("/clusterManagement/tenancy/mode")
+        return data.get("data", {}) or {}
+
+    def get_manager_services(self, manager_ip: str) -> list[dict]:
+        """Which cluster services run on one Manager node, and their state.
+
+        Verified against Cisco's VManageDetails model: service, enabled, status.
+        """
+        data = self._get(f"/clusterManagement/vManage/details/{manager_ip}")
+        return data.get("data", []) or []
 
     def probe(self, path: str, method: str = "GET") -> dict:
         """Call an endpoint just to see whether this controller has it.
@@ -479,6 +496,12 @@ class MockSDWANClient:
             {"system-ip": "1.1.1.1", "host-name": "vManage-1", "device-type": "vmanage",
              "reachability": "reachable", "status": "normal", "board-serial": "SN-001",
              "version": "20.12.1", "site-id": "100", "uptime-date": 1713000000000},
+            {"system-ip": "1.1.1.2", "host-name": "vManage-2", "device-type": "vmanage",
+             "reachability": "reachable", "status": "normal", "board-serial": "SN-001B",
+             "version": "20.12.1", "site-id": "100", "uptime-date": 1713000000000},
+            {"system-ip": "1.1.1.3", "host-name": "vManage-3", "device-type": "vmanage",
+             "reachability": "reachable", "status": "normal", "board-serial": "SN-001C",
+             "version": "20.12.1", "site-id": "100", "uptime-date": 1713000000000},
             {"system-ip": "2.2.2.1", "host-name": "vSmart-1", "device-type": "vsmart",
              "reachability": "reachable", "status": "normal", "board-serial": "SN-002",
              "version": "20.12.1", "site-id": "100", "uptime-date": 1713000000000},
@@ -520,10 +543,13 @@ class MockSDWANClient:
         ]
 
     def get_device_counters(self) -> dict:
+        """Derived from the inventory, so the two can never drift apart."""
+        devices = self._base_devices()
+        reachable = sum(1 for d in devices if d.get("reachability") == "reachable")
         return {
-            "totalCount": 11,
-            "reachableCount": 9,
-            "unreachableCount": 2,
+            "totalCount": len(devices),
+            "reachableCount": reachable,
+            "unreachableCount": len(devices) - reachable,
             "partialCount": 0,
         }
 
@@ -574,13 +600,39 @@ class MockSDWANClient:
         ]
 
     def get_reachability_summary(self) -> dict:
-        return {"reachable": 9, "unreachable": 2}
+        counters = self.get_device_counters()
+        return {"reachable": counters["reachableCount"],
+                "unreachable": counters["unreachableCount"]}
+
+    def get_tenancy_mode(self) -> dict:
+        return {
+            "mode": "SingleTenant",
+            "deploymentmode": "cluster",
+            "domain": "corp.example.com",
+            "clusterid": "cluster-1",
+        }
+
+    def get_manager_services(self, manager_ip: str) -> list[dict]:
+        """Services per node. The third node has its configuration-db turned
+        off, which leaves the cluster with two — the check exists for exactly
+        this, so the demo shows it rather than a uniformly clean result."""
+        running = {"enabled": True, "status": "running"}
+        base = [
+            {"service": "application-server", **running},
+            {"service": "messaging-server", **running},
+            {"service": "statistics-db", **running},
+        ]
+        config_db = {"service": "configuration-db", "enabled": True, "status": "running"}
+        if manager_ip == "1.1.1.3":
+            config_db = {"service": "configuration-db", "enabled": False, "status": "stopped"}
+        return base + [config_db]
 
     def get_server_info(self) -> dict:
         """Shaped like the ServerInfo model in Cisco's catalystwan SDK."""
         return {
             "platformVersion": "20.12.1",
             "tenancyMode": "SingleTenant",
+            "clusterId": "cluster-1",
             "viewMode": "provider",
             "capabilities": ["dashboard", "monitor", "configuration", "tools"],
         }

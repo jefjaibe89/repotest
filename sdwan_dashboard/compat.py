@@ -85,6 +85,15 @@ SOURCES = [
         "feeds": "eaar.title", "required": False, "evidence": CATALOGUED,
     },
     {
+        "key": "tenancy", "method": "GET", "path": "/clusterManagement/tenancy/mode",
+        "feeds": "deploy.title", "required": False, "evidence": CATALOGUED,
+    },
+    {
+        "key": "manager_services", "method": "GET",
+        "path": "/clusterManagement/vManage/details/{ip}",
+        "feeds": "deploy.title", "required": False, "evidence": CATALOGUED,
+    },
+    {
         "key": "counters", "method": "GET", "path": "/device/counters",
         "feeds": "nav.overview", "required": False, "evidence": UNVERIFIED,
     },

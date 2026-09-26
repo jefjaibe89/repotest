@@ -475,6 +475,13 @@ def prometheus_metrics():
                     content_type=metrics.CONTENT_TYPE)
 
 
+@app.route("/api/deployment")
+@auth.login_required
+def api_deployment():
+    """Standalone or cluster, and whether it meets that scenario's rules."""
+    return served("deployment")
+
+
 @app.route("/api/fabric-versions")
 @auth.login_required
 def api_fabric_versions():

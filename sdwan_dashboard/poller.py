@@ -107,6 +107,24 @@ def collect(client) -> dict:
     # Every node's release, not just the ones a feature happens to need.
     fabric_versions = analysis.analyse_fabric_versions(devices_raw)
 
+    # Which deployment this is, so it can be judged by that scenario's rules.
+    # Service detail is fetched per Manager node, and any node that refuses
+    # simply contributes nothing rather than failing the poll.
+    tenancy = optional("tenancy", client.get_tenancy_mode, {})
+    manager_services = {}
+    for device in devices_raw:
+        if sdwan_client.device_role(device.get("device-type")) != "manager":
+            continue
+        ip = device.get("system-ip")
+        if not ip:
+            continue
+        manager_services[ip] = optional(
+            f"manager_services:{ip}",
+            lambda ip=ip: client.get_manager_services(ip),
+            [],
+        )
+    deployment = analysis.analyse_deployment(devices_raw, tenancy, manager_services)
+
     server = optional("server", client.get_server_info, {})
 
     report = health_mod.compute(
@@ -154,6 +172,7 @@ def collect(client) -> dict:
         "aar": aar,
         "enhanced_aar": enhanced_aar,
         "fabric_versions": fabric_versions,
+        "deployment": deployment,
         "compat": {
             # What this controller told us about itself, and which of our data
             # sources it actually served. Asserted compatibility is worth less

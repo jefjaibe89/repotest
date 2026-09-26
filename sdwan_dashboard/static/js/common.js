@@ -68,6 +68,14 @@ function tRole(role, short) {
   return out === key ? role : out;
 }
 
+// Findings are computed server-side, where the viewer's language is not
+// known, so a role name arrives as its canonical key. Translate it before it
+// is interpolated, or a Spanish sentence ends up containing "validator".
+function localiseParams(params) {
+  if (!params || !("role" in params)) return params;
+  return { ...params, role: tRole(params.role) };
+}
+
 function roleLegacy(role) {
   const key = "role.legacy." + role;
   const out = t(key);

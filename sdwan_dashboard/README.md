@@ -120,6 +120,7 @@ Every endpoint returns JSON and is safe to scrape from another tool.
 | `GET /api/bfd` · `/api/omp` · `/api/interfaces` · `/api/control` | Per-panel data |
 | `GET /api/status` | Poller freshness: age, staleness, last error |
 | `GET /api/fabric-versions` | Release consistency across every node, by role |
+| `GET /api/deployment` | Standalone or cluster, and whether it meets that scenario's rules |
 | `GET /api/export/devices.csv` | Inventory as a CSV download |
 | `GET /healthz` | Liveness probe |
 | `GET /metrics` | Prometheus exposition (off by default) |

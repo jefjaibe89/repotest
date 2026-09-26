@@ -152,9 +152,129 @@ function renderFabricFindings(findings) {
     const color = SEV_COLORS[f.severity] || DIM;
     return `<div class="finding-item">
       <span class="finding-dot" style="background:${color}"></span>
-      <span>${esc(t(f.key, f.params))}</span>
+      <span>${esc(t(f.key, localiseParams(f.params)))}</span>
     </div>`;
   }).join("");
 }
 
-startAutoRefresh([loadCompat, loadFabricVersions]);
+
+// ------------------------------------------------- deployment scenario
+const DEPLOY_COLORS = {
+  healthy: GREEN, degraded: ORANGE, broken: RED, unknown: DIM,
+};
+
+// Services expected on every node, against configuration-db which is capped
+// at three by design.
+const SERVICE_EXPECTATION = {
+  "configuration-db": { exactly: 3 },
+};
+
+async function loadDeployment() {
+  const d = await fetchJSON("/api/deployment");
+  const color = DEPLOY_COLORS[d.health] || DIM;
+
+  const mode = document.getElementById("deploy-mode");
+  mode.textContent = t("deploy.mode." + d.mode);
+  mode.style.color = color;
+  document.getElementById("deploy-card").style.borderLeftColor = color;
+  document.getElementById("deploy-desc").textContent = t("deploy.desc." + d.mode);
+  document.getElementById("deploy-health").textContent = t("deploy.health." + d.health);
+
+  // The scenario's own facts, shown only when the controller reported them.
+  const stats = [
+    [d.totals.managers, t("deploy.managers")],
+    [d.totals.controllers, tRole("controller")],
+    [d.totals.validators, tRole("validator")],
+  ];
+  document.getElementById("deploy-stats").innerHTML = stats.map(
+    ([n, label]) => `<span class="eaar-stat"><strong>${esc(n)}</strong> ${esc(label)}</span>`
+  ).join("");
+
+  const ident = [];
+  if (d.cluster_id) ident.push(`${t("deploy.cluster_id")}: ${d.cluster_id}`);
+  if (d.tenancy) ident.push(`${t("deploy.tenancy")}: ${d.tenancy}`);
+  if (d.domain) ident.push(`${t("deploy.domain")}: ${d.domain}`);
+  document.getElementById("deploy-cluster-id").textContent = ident.join(" · ");
+
+  renderServiceRows(d);
+  renderRedundancy(d.roles);
+  renderManagerNodes(d);
+  renderDeployFindings(d.findings);
+}
+
+function renderServiceRows(d) {
+  const tbody = document.getElementById("deploy-service-tbody");
+  if (d.mode !== "cluster") {
+    tbody.innerHTML = emptyRow(4, t("deploy.not_clustered"));
+    return;
+  }
+
+  const nodes = d.totals.managers;
+  tbody.innerHTML = Object.entries(d.service_counts).map(([service, running]) => {
+    const rule = SERVICE_EXPECTATION[service];
+    const expected = rule ? rule.exactly : nodes;
+    const label = rule
+      ? t("deploy.exactly", { count: rule.exactly })
+      : t("deploy.every_node");
+    const ok = running === expected;
+    return `<tr class="${ok ? "" : "row-alert"}">
+      <td class="mono-cell" style="font-weight:600">${esc(service)}</td>
+      <td class="mono-cell">${esc(running)} ${esc(t("deploy.of_nodes", { count: nodes }))}</td>
+      <td>${esc(label)}</td>
+      <td>${ok ? verdictPill("ok") : verdictPill("critical")}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderRedundancy(roles) {
+  const wrap = document.getElementById("deploy-redundancy");
+  wrap.innerHTML = Object.values(roles).map(r => `<div class="eaar-device">
+    <span class="eaar-device-name">${esc(tRole(r.role))}</span>
+    <span class="eaar-device-ver">
+      <b>${esc(r.count)}</b> ·
+      ${r.redundant
+        ? `<span style="color:${GREEN}">${esc(t("deploy.redundant_yes"))}</span>`
+        : `<span style="color:${ORANGE}">${esc(t("deploy.redundant_no"))}</span>`}
+    </span>
+  </div>`).join("");
+}
+
+function renderManagerNodes(d) {
+  const tbody = document.getElementById("deploy-node-tbody");
+  if (!d.nodes.length) {
+    tbody.innerHTML = emptyRow(5, t("common.no_data"));
+    return;
+  }
+  tbody.innerHTML = d.nodes.map(n => {
+    const services = n.services.length
+      ? n.services.map(s => `<span class="chip" style="color:${s.healthy ? GREEN : RED};
+           border-color:${s.healthy ? GREEN : RED}" title="${esc(s.status)}">${esc(s.service)}</span>`).join(" ")
+      : `<span class="small">${esc(t("deploy.no_service_data"))}</span>`;
+    return `<tr class="${n.reachable ? "" : "row-alert"}">
+      <td style="font-weight:600">${esc(n.hostname)}</td>
+      <td class="mono-cell">${esc(n.system_ip)}</td>
+      <td class="mono-cell">${esc(n.version || "—")}</td>
+      <td>${services}</td>
+      <td>${n.reachable
+        ? `<span class="pill pill-ok">${esc(t("devices.reachable"))}</span>`
+        : `<span class="pill pill-critical">${esc(t("devices.unreachable"))}</span>`}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderDeployFindings(findings) {
+  const wrap = document.getElementById("deploy-findings");
+  if (!findings.length) {
+    wrap.innerHTML = `<div class="finding-all-clear">✓ ${esc(t("deploy.health.healthy"))}</div>`;
+    return;
+  }
+  wrap.innerHTML = findings.map(f => {
+    const color = SEV_COLORS[f.severity] || DIM;
+    return `<div class="finding-item">
+      <span class="finding-dot" style="background:${color}"></span>
+      <span>${esc(t(f.key, localiseParams(f.params)))}</span>
+    </div>`;
+  }).join("");
+}
+
+startAutoRefresh([loadCompat, loadDeployment, loadFabricVersions]);

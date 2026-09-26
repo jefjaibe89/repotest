@@ -44,6 +44,77 @@
     <p class="eaar-why">{{ t("compat.disclaimer") }}</p>
   </section>
 
+  <!-- ---- Deployment scenario: standalone or cluster ---- -->
+  <section class="eaar-card" id="deploy-card">
+    <div class="eaar-head">
+      <div class="eaar-verdict">
+        <span class="eaar-state" id="deploy-mode">—</span>
+        <span class="eaar-label">{{ t("deploy.title") }}</span>
+      </div>
+      <div class="eaar-stats" id="deploy-stats"></div>
+    </div>
+
+    <p class="eaar-desc" id="deploy-desc">{{ t("common.loading") }}</p>
+    <p class="eaar-why" id="deploy-health">—</p>
+
+    <div class="eaar-grid">
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("deploy.services") }}</p>
+        <div class="table-scroll">
+          <table class="data-table compact">
+            <thead>
+              <tr>
+                <th>{{ t("deploy.service") }}</th>
+                <th>{{ t("deploy.running_on") }}</th>
+                <th>{{ t("deploy.expected_on") }}</th>
+                <th>{{ t("devices.status") }}</th>
+              </tr>
+            </thead>
+            <tbody id="deploy-service-tbody">
+              <tr><td colspan="4" class="loading-cell">{{ t("common.loading") }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="eaar-block-title" style="margin-top:18px">{{ t("deploy.redundancy") }}</p>
+        <div id="deploy-redundancy" class="eaar-devices">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+      </div>
+
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("eaar.what_to_do") }}</p>
+        <div id="deploy-findings" class="findings-list">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Manager nodes and their services ---- -->
+  <section class="table-card">
+    <div class="card-header">
+      <h3>{{ t("deploy.managers") }}</h3>
+      <span class="tunnel-summary" id="deploy-cluster-id">—</span>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("deploy.node") }}</th>
+            <th>{{ t("devices.system_ip") }}</th>
+            <th>{{ t("devices.version") }}</th>
+            <th>{{ t("deploy.node_services") }}</th>
+            <th>{{ t("devices.status") }}</th>
+          </tr>
+        </thead>
+        <tbody id="deploy-node-tbody">
+          <tr><td colspan="5" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <!-- ---- Release consistency across every node ---- -->
   <section class="eaar-card" id="fabric-card">
     <div class="eaar-head">
