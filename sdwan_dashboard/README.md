@@ -20,7 +20,7 @@ python app.py
 
 Open <http://localhost:5000>.
 
-### Connecting to a real vManage
+### Connecting to a real controller
 
 ```bash
 cp .env.example .env
@@ -138,10 +138,10 @@ All settings are environment variables; see `.env.example` for the full list.
 | Variable | Default | Notes |
 |---|---|---|
 | `SDWAN_MODE` | `mock` | `live` talks to vManage |
-| `VMANAGE_HOST` / `_PORT` | — / `8443` | Controller address |
-| `VMANAGE_USER` / `_PASS` | — | Credentials |
-| `VMANAGE_VERIFY_SSL` | `true` | `true`, `false`, or a path to the CA bundle for vManage's certificate |
-| `VMANAGE_TIMEOUT` | `20` | Per-request timeout, seconds |
+| `MANAGER_HOST` / `_PORT` | — / `8443` | Controller address (`VMANAGE_*` also accepted) |
+| `MANAGER_USER` / `_PASS` | — | Credentials |
+| `MANAGER_VERIFY_SSL` | `true` | `true`, `false`, or a path to the CA bundle for vManage's certificate |
+| `MANAGER_TIMEOUT` | `20` | Per-request timeout, seconds |
 | `SESSION_TTL_SECONDS` | `900` | How long a vManage login is reused |
 | `POLL_INTERVAL_SECONDS` | `30` | How often the fabric is collected |
 | `REFRESH_INTERVAL_SECONDS` | `30` | Browser auto-refresh cadence |
@@ -176,6 +176,8 @@ All settings are environment variables; see `.env.example` for the full list.
 **One failing panel does not blank the page.** The browser refreshes panels with `Promise.allSettled`, so a single failing endpoint leaves the rest on screen.
 
 **It feeds the monitoring you already have.** `/metrics` exposes the fabric score, per-device CPU and memory, link utilisation, QoS drops and SLA compliance in Prometheus format, so the fabric shows up in the Grafana a NOC already watches instead of being one more screen. `sdwan_up` and `sdwan_poll_age_seconds` are reported separately from fabric health, so a stopped collector can be alerted on distinctly from a degraded network.
+
+**Current names, legacy values.** Cisco renamed vManage to Catalyst SD-WAN Manager, vSmart to Controller, vBond to Validator and vEdge/cEdge to Edge, but the API kept the original `device-type` values — Cisco's own SDK still declares `Personality` as `vsmart`/`vbond`/`vedge`/`vmanage`. The dashboard matches on the old values, shows the new names, and keeps the old one in a tooltip because operators still say "vManage" out loud. Both spellings are accepted, so a release that does switch them will not quietly empty the per-role views.
 
 **Errors stay readable.** Transport exceptions are translated before they reach the operator — "the host is unreachable or refused the connection", not a urllib3 object address.
 

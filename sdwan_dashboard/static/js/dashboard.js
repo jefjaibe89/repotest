@@ -252,12 +252,9 @@ function renderDeviceTable(devices) {
                       : "status-warning";
     const statusDot = d.reachability === "reachable" ? "●" : "●";
 
-    const typeClass = {
-      vmanage: "type-vmanage",
-      vsmart:  "type-vsmart",
-      vbond:   "type-vbond",
-      vedge:   "type-vedge",
-    }[d.device_type] || "type-vedge";
+    // Styled and labelled by role, so a renamed device-type keeps its colour
+    // and its name instead of falling back to the edge styling.
+    const typeClass = d.role ? `type-${d.role}` : "type-unknown";
 
     const cpuHtml  = barHtml(d.cpu);
     const memHtml  = barHtml(d.memory);
@@ -268,7 +265,7 @@ function renderDeviceTable(devices) {
                 data-hostname="${esc(d.hostname)}">
       <td style="font-weight:600">${esc(d.hostname)}</td>
       <td style="font-family:monospace;color:#7A9BBF">${esc(d.system_ip)}</td>
-      <td><span class="type-chip ${typeClass}">${esc(d.device_type)}</span></td>
+      <td><span class="type-chip ${typeClass}" title="${esc(roleLegacy(d.role))}">${esc(tRole(d.role, true))}</span></td>
       <td style="color:#7A9BBF">${esc(d.model)}</td>
       <td style="color:#7A9BBF">${esc(d.version)}</td>
       <td>${esc(d.site_id)}</td>
@@ -327,10 +324,9 @@ async function loadControl() {
     return;
   }
 
-  const labelMap = { vmanage: "vManage", vsmart: "vSmart", vbond: "vBond" };
-
   list.innerHTML = data.map(item => {
-    const name = labelMap[item["device-type"]] || esc(item["device-type"]);
+    const role = ROLE_OF[String(item["device-type"] || "").toLowerCase()] || null;
+    const name = role ? tRole(role) : esc(item["device-type"]);
     const up   = item.up   ?? item.count ?? 0;
     const down = item.down ?? 0;
     const total = item.count ?? (up + down);

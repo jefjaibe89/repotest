@@ -16,6 +16,15 @@ const DIM        = "#7A9BBF";
 const SEV_COLORS = { Critical: RED, Major: ORANGE, Minor: YELLOW, Info: DIM };
 const SEVERITIES = ["Critical", "Major", "Minor", "Info"];
 
+// Mirrors DEVICE_ROLES in sdwan_client.py, for the few payloads that carry a
+// raw device-type rather than a normalised role.
+const ROLE_OF = {
+  vmanage: "manager", manager: "manager",
+  vsmart: "controller", controller: "controller",
+  vbond: "validator", validator: "validator",
+  vedge: "edge", cedge: "edge", edge: "edge",
+};
+
 // Verdicts produced by analysis.py, mapped to the colour each one is shown in.
 const VERDICT_COLORS = {
   ok: GREEN, warning: ORANGE, critical: RED, down: DIM,
@@ -48,6 +57,22 @@ function tReach(state) {
 }
 
 function tVerdict(verdict) { return t("verdict." + verdict); }
+
+// Cisco's current product names, shown from the canonical role rather than
+// the wire value. The legacy name goes in the title attribute, because
+// operators still say "vManage" and need to recognise the row.
+function tRole(role, short) {
+  if (!role) return t("role.unknown");
+  const key = (short ? "role.short." : "role.") + role;
+  const out = t(key);
+  return out === key ? role : out;
+}
+
+function roleLegacy(role) {
+  const key = "role.legacy." + role;
+  const out = t(key);
+  return out === key ? "" : t("role.also_known_as", { legacy: out });
+}
 
 // ---------------------------------------------------------------- escaping
 function esc(str) {

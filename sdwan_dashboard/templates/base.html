@@ -40,7 +40,7 @@
       ● {{ t("nav.live") if mode == "live" else t("nav.demo") }}
     </span>
     {% if mode == 'live' %}
-    <span class="meta-host">vManage: {{ vmanage_host }}</span>
+    <span class="meta-host">{{ t("nav.manager_host") }} {{ vmanage_host }}</span>
     {% endif %}
     {% if alerts_enabled %}
     <span class="meta-refresh" title="{{ t('nav.alerts_title') }}">🔔 {{ t("nav.alerts_on") }}</span>

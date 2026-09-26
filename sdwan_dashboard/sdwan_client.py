@@ -114,6 +114,41 @@ def normalise_sla_definition(row: dict) -> dict:
     }
 
 
+# -------------------------------------------------------------- device roles
+# Cisco renamed the products — vManage is now Catalyst SD-WAN Manager, vSmart
+# the Controller, vBond the Validator, vEdge/cEdge the Edge — but the wire
+# values did not follow: the Personality enum in Cisco's current SDK still
+# reads vsmart/vbond/vedge/vmanage, with the member named EDGE and valued
+# "vedge". So the API is matched on the old names and the UI shows the new
+# ones.
+#
+# The newer spellings are accepted anyway. If a release ever does switch them,
+# a role filter that only knew the legacy values would quietly report zero
+# edges rather than failing — the same shape of bug as a version table that
+# does not recognise a newer train.
+DEVICE_ROLES = {
+    "vmanage": "manager", "manager": "manager", "sdwan-manager": "manager",
+    "sdwanmanager": "manager",
+    "vsmart": "controller", "controller": "controller",
+    "sdwan-controller": "controller", "sdwancontroller": "controller",
+    "vbond": "validator", "validator": "validator",
+    "sdwan-validator": "validator", "sdwanvalidator": "validator",
+    "vedge": "edge", "cedge": "edge", "edge": "edge",
+    "sdwan-edge": "edge", "sdwanedge": "edge", "wan-edge": "edge",
+}
+
+
+def device_role(device_type) -> str | None:
+    """Canonical role for a device-type value, whatever naming it arrives in.
+
+    Returns None for anything unrecognised, so a caller can show the raw value
+    rather than silently filing it under the wrong role.
+    """
+    if not device_type:
+        return None
+    return DEVICE_ROLES.get(str(device_type).strip().lower().replace("_", "-"))
+
+
 def describe_key(exc: Exception) -> str | None:
     """Catalog key for a transport failure, so the UI can render it translated.
 

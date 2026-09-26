@@ -10,11 +10,25 @@ def _flag(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).lower() in ("true", "1", "yes", "on")
 
 
+def _setting(*names: str, default: str = "") -> str:
+    """First of several environment names that is set.
+
+    Cisco renamed vManage to SD-WAN Manager, so MANAGER_* reads naturally now
+    while VMANAGE_* is what existing deployments already have. Both work, and
+    neither is deprecated out from under anyone.
+    """
+    for name in names:
+        value = os.getenv(name)
+        if value is not None:
+            return value
+    return default
+
+
 # ---- vManage connection ---------------------------------------------------
-VMANAGE_HOST = os.getenv("VMANAGE_HOST", "localhost")
-VMANAGE_PORT = int(os.getenv("VMANAGE_PORT", "8443"))
-VMANAGE_USER = os.getenv("VMANAGE_USER", "admin")
-VMANAGE_PASS = os.getenv("VMANAGE_PASS", "admin")
+VMANAGE_HOST = _setting("MANAGER_HOST", "VMANAGE_HOST", default="localhost")
+VMANAGE_PORT = int(_setting("MANAGER_PORT", "VMANAGE_PORT", default="8443"))
+VMANAGE_USER = _setting("MANAGER_USER", "VMANAGE_USER", default="admin")
+VMANAGE_PASS = _setting("MANAGER_PASS", "VMANAGE_PASS", default="admin")
 def _verify_setting(raw: str) -> bool | str:
     """Resolve VMANAGE_VERIFY_SSL into what requests expects.
 
@@ -33,8 +47,10 @@ def _verify_setting(raw: str) -> bool | str:
     return value
 
 
-VMANAGE_VERIFY_SSL = _verify_setting(os.getenv("VMANAGE_VERIFY_SSL", "true"))
-VMANAGE_TIMEOUT = int(os.getenv("VMANAGE_TIMEOUT", "20"))
+VMANAGE_VERIFY_SSL = _verify_setting(
+    _setting("MANAGER_VERIFY_SSL", "VMANAGE_VERIFY_SSL", default="true")
+)
+VMANAGE_TIMEOUT = int(_setting("MANAGER_TIMEOUT", "VMANAGE_TIMEOUT", default="20"))
 
 # Set to "mock" to use demo data without a real vManage instance
 MODE = os.getenv("SDWAN_MODE", "mock")

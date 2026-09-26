@@ -192,8 +192,12 @@ def test_compat_endpoint_reports_the_controller(client):
 
 
 def test_compat_is_translated(client):
+    """Check the page is in Spanish, not one particular wording of it —
+    product names change and the test should not break when they do."""
     body = client.get("/compat?lang=es").get_data(as_text=True)
-    assert "Compatibilidad con vManage" in body
+    assert 'lang="es"' in body
+    assert "Fuentes de datos" in body
+    assert "Este controlador" in body
 
 
 # ----------------------------------------------- forward compatibility
@@ -284,3 +288,99 @@ def test_api_reports_the_release_verdict(client):
     assert release["status"] in ("within_audit", "newer_than_verified",
                                 "below_minimum", "unknown")
     assert release["verified_to"]
+
+
+# ------------------------------------------------------- product naming
+# Cisco renamed vManage to Catalyst SD-WAN Manager, vSmart to Controller,
+# vBond to Validator and vEdge/cEdge to Edge. The wire values did not follow —
+# Cisco's own SDK still declares Personality as vsmart/vbond/vedge/vmanage —
+# so the API is matched on the old names while the UI shows the new ones.
+@pytest.mark.parametrize("value,role", [
+    ("vmanage", "manager"), ("vManage", "manager"), ("VMANAGE", "manager"),
+    ("vsmart", "controller"), ("vbond", "validator"),
+    ("vedge", "edge"), ("cedge", "edge"),
+])
+def test_legacy_device_types_map_to_a_role(value, role):
+    from sdwan_client import device_role
+    assert device_role(value) == role
+
+
+@pytest.mark.parametrize("value,role", [
+    ("manager", "manager"), ("sdwan-manager", "manager"), ("SDWAN_Manager", "manager"),
+    ("controller", "controller"), ("sdwan-controller", "controller"),
+    ("validator", "validator"), ("edge", "edge"), ("wan-edge", "edge"),
+])
+def test_current_names_map_to_the_same_role(value, role):
+    """If a release ever does switch the wire values, the views must not
+    quietly empty out the way a version table does on an unknown train."""
+    from sdwan_client import device_role
+    assert device_role(value) == role
+
+
+@pytest.mark.parametrize("value", ["", None, "nonsense", "vsmarts"])
+def test_unknown_device_type_has_no_role(value):
+    """None rather than a guess, so the UI can show the raw value instead of
+    filing the device under the wrong role."""
+    from sdwan_client import device_role
+    assert device_role(value) is None
+
+
+def test_enhanced_aar_finds_edges_under_either_naming():
+    import analysis
+
+    for device_type in ("vedge", "cedge", "edge", "sdwan-edge"):
+        out = analysis.analyse_enhanced_aar(
+            devices=[{"device-type": device_type, "version": "17.12.3",
+                      "host-name": "e", "reachability": "reachable"}],
+            sla_definitions=[_sla_def()], probe_classes=[_probe_def()],
+        )
+        assert out["totals"]["devices_total"] == 1, f"{device_type} was not seen as an edge"
+
+
+def test_controllers_are_still_excluded_from_the_edge_check():
+    import analysis
+
+    out = analysis.analyse_enhanced_aar(
+        devices=[{"device-type": "manager", "version": "20.12.1", "host-name": "m"},
+                 {"device-type": "controller", "version": "20.12.1", "host-name": "c"},
+                 {"device-type": "validator", "version": "20.12.1", "host-name": "v"}],
+        sla_definitions=[_sla_def()], probe_classes=[_probe_def()],
+    )
+    assert out["totals"]["devices_total"] == 0, "only edges run app-route probes"
+
+
+def test_devices_carry_a_role_alongside_the_raw_value(client):
+    for device in client.get("/api/devices").get_json():
+        assert "device_type" in device, "the wire value is preserved"
+        assert device["role"] in ("manager", "controller", "validator", "edge")
+
+
+# ------------------------------------------------- environment aliases
+def test_manager_prefixed_settings_are_accepted(monkeypatch):
+    """MANAGER_* reads naturally now; VMANAGE_* is what deployments have."""
+    import importlib
+
+    import config
+
+    monkeypatch.delenv("VMANAGE_HOST", raising=False)
+    monkeypatch.setenv("MANAGER_HOST", "manager.example.com")
+    assert importlib.reload(config).VMANAGE_HOST == "manager.example.com"
+
+    monkeypatch.delenv("MANAGER_HOST")
+    monkeypatch.setenv("VMANAGE_HOST", "vmanage.example.com")
+    assert importlib.reload(config).VMANAGE_HOST == "vmanage.example.com"
+
+
+def test_the_current_name_wins_when_both_are_set(monkeypatch):
+    import importlib
+
+    import config
+
+    monkeypatch.setenv("MANAGER_HOST", "new.example.com")
+    monkeypatch.setenv("VMANAGE_HOST", "old.example.com")
+    reloaded = importlib.reload(config)
+    assert reloaded.VMANAGE_HOST == "new.example.com"
+
+    monkeypatch.delenv("MANAGER_HOST")
+    monkeypatch.delenv("VMANAGE_HOST")
+    importlib.reload(config)

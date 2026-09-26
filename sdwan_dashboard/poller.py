@@ -22,6 +22,7 @@ import compat
 import config
 import health as health_mod
 import store
+import sdwan_client
 from sdwan_client import SDWANError
 
 log = logging.getLogger("sdwan-dashboard.poller")
@@ -168,6 +169,8 @@ def normalize_device(d: dict) -> dict:
         "system_ip": d.get("system-ip"),
         "hostname": d.get("host-name"),
         "device_type": d.get("device-type"),
+        # Canonical role, so the UI is not tied to the wire spelling.
+        "role": sdwan_client.device_role(d.get("device-type")),
         "model": d.get("device-model", "—"),
         "version": d.get("version", "—"),
         "site_id": d.get("site-id", "—"),

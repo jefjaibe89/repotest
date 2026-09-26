@@ -10,6 +10,7 @@ Computed once per poll so every worker serves the same numbers.
 """
 
 import config
+import sdwan_client
 
 # A queue is called out once its drop ratio crosses these.
 QOS_WARN_RATIO = 0.001   # 0.1 %
@@ -385,7 +386,8 @@ def analyse_enhanced_aar(
         })
 
     # --- per device ---
-    edges = [d for d in devices if d.get("device-type") == "vedge"]
+    # Matched by role: "vedge" today, but a rename must not empty this list.
+    edges = [d for d in devices if sdwan_client.device_role(d.get("device-type")) == "edge"]
     device_rows = []
     for d in edges:
         ok, floor = supports_enhanced_aar(d.get("version"))

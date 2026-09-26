@@ -520,10 +520,12 @@ html, body {
   letter-spacing: .4px;
 }
 
-.type-vmanage { background: rgba(0,188,235,.15); color: var(--cisco-blue); }
-.type-vsmart  { background: rgba(155,89,182,.2); color: #c39bd3; }
-.type-vbond   { background: rgba(255,154,60,.15); color: var(--orange); }
-.type-vedge   { background: rgba(0,214,143,.12);  color: var(--green); }
+/* Named by role, not by the wire value, so a rename keeps the colour. */
+.type-manager   { background: rgba(0,188,235,.15); color: var(--cisco-blue); }
+.type-controller{ background: rgba(155,89,182,.2); color: #c39bd3; }
+.type-validator { background: rgba(255,154,60,.15); color: var(--orange); }
+.type-edge      { background: rgba(0,214,143,.12);  color: var(--green); }
+.type-unknown   { background: var(--surface2);      color: var(--text-dim); }
 
 /* ---- Side panel ---- */
 .side-panel {
