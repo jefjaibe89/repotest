@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}{{ t("links.title") }} — {{ t("app.subtitle") }}{% endblock %}
+
+{% block content %}
+  <section class="view-head">
+    <h1 class="view-title">{{ t("links.title") }}</h1>
+    <p class="view-sub">{{ t("links.subtitle") }}</p>
+  </section>
+
+  <section class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("links.circuits") }}</p>
+        <p class="kpi-value" id="link-count">—</p>
+        <p class="kpi-sub">
+          <span class="dot-red"></span><span id="link-down">—</span> {{ t("links.down") }}
+        </p>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("links.contracted") }}</p>
+        <p class="kpi-value" id="link-capacity">—</p>
+        <p class="kpi-sub">{{ t("links.upstream_total") }}</p>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("links.in_use") }}</p>
+        <p class="kpi-value" id="link-tx">—</p>
+        <p class="kpi-sub">{{ t("links.rx") }} <span id="link-rx">—</span></p>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("links.pressure") }}</p>
+        <p class="kpi-value alarms-val">
+          <span id="link-saturated">—</span>
+          <span id="link-busy">—</span>
+        </p>
+        <p class="kpi-sub">
+          <span class="dot-red"></span>{{ t("links.saturated") }} &nbsp;
+          <span class="dot-orange"></span>{{ t("links.busy") }}
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Capacity vs use, per colour ---- -->
+  <section class="chart-card">
+    <h3 class="chart-title">{{ t("links.by_color") }}</h3>
+    <div class="chart-wrap chart-wrap-trend">
+      <canvas id="chartLinkColor"></canvas>
+    </div>
+  </section>
+
+  <!-- ---- Per circuit ---- -->
+  <section class="table-card">
+    <div class="card-header">
+      <h3>{{ t("links.per_circuit") }}</h3>
+      <span class="tunnel-summary">{{ t("links.sorted_by_use") }}</span>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("devices.hostname") }}</th>
+            <th>{{ t("modal.interface") }}</th>
+            <th>{{ t("modal.color") }}</th>
+            <th>{{ t("links.contracted") }}</th>
+            <th>{{ t("links.tx_use") }}</th>
+            <th>{{ t("links.rx_use") }}</th>
+            <th>{{ t("links.throughput") }}</th>
+            <th>{{ t("devices.status") }}</th>
+          </tr>
+        </thead>
+        <tbody id="link-tbody">
+          <tr><td colspan="8" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ---- Per colour roll-up ---- -->
+  <section class="table-card">
+    <div class="card-header"><h3>{{ t("links.per_color") }}</h3></div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("modal.color") }}</th>
+            <th>{{ t("links.circuits") }}</th>
+            <th>{{ t("links.capacity") }}</th>
+            <th>{{ t("links.in_use") }}</th>
+            <th>{{ t("links.utilisation") }}</th>
+          </tr>
+        </thead>
+        <tbody id="color-tbody">
+          <tr><td colspan="5" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/links.js') }}"></script>
+{% endblock %}

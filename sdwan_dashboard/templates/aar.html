@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}{{ t("aar.title") }} — {{ t("app.subtitle") }}{% endblock %}
+
+{% block content %}
+  <section class="view-head">
+    <h1 class="view-title">{{ t("aar.title") }}</h1>
+    <p class="view-sub">{{ t("aar.subtitle") }}</p>
+  </section>
+
+  <!-- ---- Enhanced AAR readiness: qualifies everything below it ---- -->
+  <section class="eaar-card" id="eaar-card">
+    <div class="eaar-head">
+      <div class="eaar-verdict">
+        <span class="eaar-state" id="eaar-state">—</span>
+        <span class="eaar-label">{{ t("eaar.title") }}</span>
+      </div>
+      <div class="eaar-stats">
+        <span class="eaar-stat">
+          <strong id="eaar-coverage">—</strong> {{ t("eaar.coverage") }}
+        </span>
+        <span class="eaar-stat">
+          <strong id="eaar-probes">—</strong> {{ t("eaar.probe_classes") }}
+        </span>
+        <span class="eaar-stat">
+          <strong id="eaar-edges">—</strong> {{ t("eaar.edges_ready") }}
+        </span>
+      </div>
+    </div>
+
+    <p class="eaar-desc" id="eaar-desc">{{ t("common.loading") }}</p>
+    <p class="eaar-why">{{ t("eaar.subtitle") }}</p>
+
+    <div class="eaar-grid">
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("eaar.per_class") }}</p>
+        <div class="table-scroll">
+          <table class="data-table compact">
+            <thead>
+              <tr>
+                <th>{{ t("aar.class") }}</th>
+                <th>{{ t("eaar.probing") }}</th>
+                <th>{{ t("eaar.probe_class") }}</th>
+                <th>{{ t("eaar.dscp") }}</th>
+                <th>{{ t("eaar.forwarding_class") }}</th>
+              </tr>
+            </thead>
+            <tbody id="eaar-class-tbody">
+              <tr><td colspan="5" class="loading-cell">{{ t("common.loading") }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="eaar-block-title" style="margin-top:18px">{{ t("eaar.blocking_devices") }}</p>
+        <div id="eaar-devices" class="eaar-devices">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+        <p class="eaar-why" id="eaar-assumed" hidden></p>
+      </div>
+
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("eaar.what_to_do") }}</p>
+        <div id="eaar-findings" class="findings-list">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("aar.compliance") }}</p>
+        <p class="kpi-value" id="aar-compliance">—</p>
+        <p class="kpi-sub">
+          <span id="aar-tunnels">—</span> {{ t("aar.tunnels_measured") }}
+        </p>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("aar.out_of_sla") }}</p>
+        <p class="kpi-value" id="aar-violating">—</p>
+        <p class="kpi-sub">{{ t("aar.breaching_now") }}</p>
+      </div>
+    </div>
+    <div class="kpi-card kpi-wide">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("aar.switchovers") }}</p>
+        <p class="kpi-value" id="aar-switchovers">—</p>
+        <p class="kpi-sub reason-row" id="aar-reasons">—</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- SLA classes ---- -->
+  <section class="table-card">
+    <div class="card-header">
+      <h3>{{ t("aar.sla_classes") }}</h3>
+      <span class="tunnel-summary">{{ t("aar.budget_note") }}</span>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("aar.class") }}</th>
+            <th>{{ t("tunnels.latency") }}</th>
+            <th>{{ t("tunnels.loss") }}</th>
+            <th>{{ t("tunnels.jitter") }}</th>
+            <th>{{ t("aar.tunnels") }}</th>
+            <th>{{ t("aar.violating") }}</th>
+            <th>{{ t("aar.compliance") }}</th>
+          </tr>
+        </thead>
+        <tbody id="sla-tbody">
+          <tr><td colspan="7" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ---- Compliance chart + switchover feed ---- -->
+  <section class="bottom-row">
+    <div class="chart-card">
+      <h3 class="chart-title">{{ t("aar.compliance_by_class") }}</h3>
+      <div class="chart-wrap chart-wrap-trend">
+        <canvas id="chartSlaCompliance"></canvas>
+      </div>
+    </div>
+
+    <div class="panel-card panel-card-grow">
+      <h3 class="panel-title">{{ t("aar.recent_switchovers") }}</h3>
+      <div id="switchover-feed" class="switch-feed">
+        <p class="loading-cell">{{ t("common.loading") }}</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Per tunnel, against its own budget ---- -->
+  <section class="table-card">
+    <div class="card-header">
+      <h3>{{ t("aar.per_tunnel") }}</h3>
+      <span class="tunnel-summary">{{ t("aar.violations_first") }}</span>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("devices.hostname") }}</th>
+            <th>{{ t("tunnels.local_color") }}</th>
+            <th>{{ t("tunnels.remote") }}</th>
+            <th>{{ t("aar.class") }}</th>
+            <th>{{ t("tunnels.latency") }}</th>
+            <th>{{ t("tunnels.loss") }}</th>
+            <th>{{ t("tunnels.jitter") }}</th>
+            <th>{{ t("devices.status") }}</th>
+          </tr>
+        </thead>
+        <tbody id="aar-tbody">
+          <tr><td colspan="8" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/aar.js') }}"></script>
+{% endblock %}

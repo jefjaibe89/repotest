@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}{{ t("app.title") }}{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 50 32'><rect x='0' y='14' width='6' height='12' fill='%2300BCEB'/><rect x='8' y='8' width='6' height='18' fill='%2300BCEB'/><rect x='16' y='2' width='6' height='24' fill='%2300BCEB'/><rect x='24' y='8' width='6' height='18' fill='%2300BCEB'/><rect x='32' y='14' width='6' height='12' fill='%2300BCEB'/></svg>" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <!-- Chart.js is served locally, not from a CDN: SD-WAN management networks
+       are frequently air-gapped, and the dashboard must render without egress. -->
+  <script src="{{ url_for('static', filename='vendor/chart.umd.js') }}"></script>
+</head>
+<body>
+
+<!-- ===== TOP NAV ===== -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <svg class="cisco-logo" viewBox="0 0 50 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0"  y="14" width="6"  height="12" rx="1" fill="#00BCEB"/>
+      <rect x="8"  y="8"  width="6"  height="18" rx="1" fill="#00BCEB"/>
+      <rect x="16" y="2"  width="6"  height="24" rx="1" fill="#00BCEB"/>
+      <rect x="24" y="8"  width="6"  height="18" rx="1" fill="#00BCEB"/>
+      <rect x="32" y="14" width="6"  height="12" rx="1" fill="#00BCEB"/>
+      <rect x="40" y="20" width="6"  height="6"  rx="1" fill="#00BCEB"/>
+    </svg>
+    <span class="brand-text">{{ t("app.brand") }}</span>
+    <span class="brand-sub">{{ t("app.subtitle") }}</span>
+  </div>
+
+  <nav class="main-nav" aria-label="{{ t('nav.views') }}">
+    {% for item in views %}
+    <a class="nav-link {{ 'active' if item.endpoint == active_view }}"
+       href="{{ url_for(item.endpoint) }}"
+       {{ 'aria-current=page' if item.endpoint == active_view }}>{{ t(item.label) }}</a>
+    {% endfor %}
+  </nav>
+
+  <div class="topbar-meta">
+    <span id="mode-badge" class="badge badge-{{ 'live' if mode == 'live' else 'demo' }}">
+      ● {{ t("nav.live") if mode == "live" else t("nav.demo") }}
+    </span>
+    {% if mode == 'live' %}
+    <span class="meta-host">{{ t("nav.manager_host") }} {{ vmanage_host }}</span>
+    {% endif %}
+    {% if alerts_enabled %}
+    <span class="meta-refresh" title="{{ t('nav.alerts_title') }}">🔔 {{ t("nav.alerts_on") }}</span>
+    {% endif %}
+    <span id="last-update" class="meta-refresh">—</span>
+
+    <div class="lang-switch" role="group" aria-label="{{ t('nav.language') }}">
+      {% for lang in languages %}
+      <a class="lang-btn {{ 'active' if lang.code == locale }}"
+         href="{{ url_for('set_language', code=lang.code, next=request.path) }}"
+         hreflang="{{ lang.code }}" lang="{{ lang.code }}"
+         title="{{ lang.name }}"
+         {{ 'aria-current=true' if lang.code == locale }}>{{ lang.code|upper }}</a>
+      {% endfor %}
+    </div>
+
+    {% if auth_enabled %}
+    <a href="{{ url_for('logout') }}" class="logout-link">{{ t("nav.sign_out") }}</a>
+    {% endif %}
+  </div>
+</header>
+
+<main class="page-content">
+
+  <!-- ---- Connection error banner (hidden until something fails) ---- -->
+  <div id="error-banner" class="error-banner" hidden>
+    <svg class="error-icon" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+    </svg>
+    <div class="error-body">
+      <strong id="error-title">{{ t("error.title") }}</strong>
+      <span id="error-detail"></span>
+    </div>
+    <button id="error-dismiss" class="error-dismiss" aria-label="{{ t('common.dismiss') }}">&times;</button>
+  </div>
+
+  {% block content %}{% endblock %}
+
+</main>
+
+{% block extra_body %}{% endblock %}
+
+<footer class="page-footer">
+  {{ t("footer.tagline") }} &nbsp;|&nbsp;
+  {{ t("footer.refresh", seconds=refresh_interval) }}
+</footer>
+
+<script nonce="{{ csp_nonce }}">
+  const REFRESH_INTERVAL = {{ refresh_interval }} * 1000;
+  // The panels are built in the browser, so the strings travel with the page
+  // rather than being fetched — the dashboard has to work without egress.
+  const I18N = {{ catalog|safe }};
+  const LOCALE = {{ locale|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

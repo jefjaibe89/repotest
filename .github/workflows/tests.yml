@@ -1,0 +1,109 @@
+name: Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdwan_dashboard
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor: the code uses `X | None` annotations at runtime.
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: sdwan_dashboard/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+  smoke:
+    # Proves the app actually boots and serves, which unit tests alone do not.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdwan_dashboard
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: sdwan_dashboard/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Start the dashboard
+        env:
+          DB_PATH: /tmp/ci.db
+          POLLER_LOCK_PATH: /tmp/ci.lock
+          FLASK_PORT: "5000"
+        run: |
+          python app.py &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:5000/healthz > /dev/null && exit 0
+            sleep 1
+          done
+          echo "Dashboard did not become healthy in 30s" >&2
+          exit 1
+
+      - name: Check every endpoint serves
+        run: |
+          fail=0
+          for path in / /healthz /api/status /api/health /api/summary /api/devices \
+                      /api/alarms /api/bfd /api/omp /api/interfaces /api/control \
+                      /api/tunnels /api/history /api/device/10.0.1.1 \
+                      /api/export/devices.csv; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:5000$path")
+            if [ "$code" != "200" ]; then
+              echo "::error::$path returned $code"
+              fail=1
+            else
+              echo "ok   $path"
+            fi
+          done
+          exit $fail
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t sdwan-dashboard:ci sdwan_dashboard
+
+      - name: Run it and wait for the healthcheck
+        run: |
+          docker run -d --name sdwan-ci -p 5000:5000 sdwan-dashboard:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:5000/healthz > /dev/null; then
+              echo "Container is serving"
+              docker rm -f sdwan-ci
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Container never became healthy" >&2
+          docker logs sdwan-ci
+          docker rm -f sdwan-ci
+          exit 1

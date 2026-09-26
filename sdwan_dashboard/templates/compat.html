@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}{{ t("compat.title") }} — {{ t("app.subtitle") }}{% endblock %}
+
+{% block content %}
+  <section class="view-head">
+    <h1 class="view-title">{{ t("compat.title") }}</h1>
+    <p class="view-sub">{{ t("compat.subtitle") }}</p>
+  </section>
+
+  <section class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("compat.controller") }}</p>
+        <p class="kpi-value" id="compat-version">—</p>
+        <p class="kpi-sub" id="compat-tenancy">—</p>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("compat.served") }}</p>
+        <p class="kpi-value" id="compat-served">—</p>
+        <p class="kpi-sub">{{ t("compat.served_sub") }}</p>
+      </div>
+    </div>
+    <div class="kpi-card kpi-wide">
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("compat.evidence") }}</p>
+        <p class="kpi-value alarms-val">
+          <span id="compat-catalogued" style="color:var(--green)">—</span>
+          <span id="compat-variant" style="color:var(--orange)">—</span>
+          <span id="compat-unverified" style="color:var(--text-dim)">—</span>
+        </p>
+        <p class="kpi-sub">
+          <span class="dot-green"></span>{{ t("compat.ev.catalogued") }} &nbsp;
+          <span class="dot-orange"></span>{{ t("compat.ev.variant") }} &nbsp;
+          <span class="dot-yellow" style="background:var(--text-dim)"></span>{{ t("compat.ev.unverified") }}
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="eaar-card">
+    <p class="eaar-desc" id="compat-range">{{ t("common.loading") }}</p>
+    <p class="eaar-why">{{ t("compat.disclaimer") }}</p>
+  </section>
+
+  <!-- ---- Deployment scenario: standalone or cluster ---- -->
+  <section class="eaar-card" id="deploy-card">
+    <div class="eaar-head">
+      <div class="eaar-verdict">
+        <span class="eaar-state" id="deploy-mode">—</span>
+        <span class="eaar-label">{{ t("deploy.title") }}</span>
+      </div>
+      <div class="eaar-stats" id="deploy-stats"></div>
+    </div>
+
+    <p class="eaar-desc" id="deploy-desc">{{ t("common.loading") }}</p>
+    <p class="eaar-why" id="deploy-health">—</p>
+
+    <div class="eaar-grid">
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("deploy.services") }}</p>
+        <div class="table-scroll">
+          <table class="data-table compact">
+            <thead>
+              <tr>
+                <th>{{ t("deploy.service") }}</th>
+                <th>{{ t("deploy.running_on") }}</th>
+                <th>{{ t("deploy.expected_on") }}</th>
+                <th>{{ t("devices.status") }}</th>
+              </tr>
+            </thead>
+            <tbody id="deploy-service-tbody">
+              <tr><td colspan="4" class="loading-cell">{{ t("common.loading") }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="eaar-block-title" style="margin-top:18px">{{ t("deploy.redundancy") }}</p>
+        <div id="deploy-redundancy" class="eaar-devices">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+      </div>
+
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("eaar.what_to_do") }}</p>
+        <div id="deploy-findings" class="findings-list">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Manager nodes and their services ---- -->
+  <section class="table-card">
+    <div class="card-header">
+      <h3>{{ t("deploy.managers") }}</h3>
+      <span class="tunnel-summary" id="deploy-cluster-id">—</span>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("deploy.node") }}</th>
+            <th>{{ t("devices.system_ip") }}</th>
+            <th>{{ t("devices.version") }}</th>
+            <th>{{ t("deploy.node_services") }}</th>
+            <th>{{ t("devices.status") }}</th>
+          </tr>
+        </thead>
+        <tbody id="deploy-node-tbody">
+          <tr><td colspan="5" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ---- Release consistency across every node ---- -->
+  <section class="eaar-card" id="fabric-card">
+    <div class="eaar-head">
+      <div class="eaar-verdict">
+        <span class="eaar-state" id="fabric-state">—</span>
+        <span class="eaar-label">{{ t("fabric.title") }}</span>
+      </div>
+      <div class="eaar-stats">
+        <span class="eaar-stat"><strong id="fabric-control">—</strong> {{ t("fabric.control_plane") }}</span>
+        <span class="eaar-stat"><strong id="fabric-edges">—</strong> {{ t("fabric.edges") }}</span>
+        <span class="eaar-stat"><strong id="fabric-versions">—</strong> {{ t("fabric.distinct_versions") }}</span>
+      </div>
+    </div>
+
+    <p class="eaar-desc" id="fabric-desc">{{ t("common.loading") }}</p>
+    <p class="eaar-why">{{ t("fabric.subtitle") }} {{ t("fabric.guidance") }}</p>
+
+    <div class="eaar-grid">
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("fabric.per_role") }}</p>
+        <div class="table-scroll">
+          <table class="data-table compact">
+            <thead>
+              <tr>
+                <th>{{ t("fabric.role") }}</th>
+                <th>{{ t("fabric.nodes") }}</th>
+                <th>{{ t("fabric.versions") }}</th>
+                <th>{{ t("fabric.consistent_col") }}</th>
+              </tr>
+            </thead>
+            <tbody id="fabric-role-tbody">
+              <tr><td colspan="4" class="loading-cell">{{ t("common.loading") }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="eaar-block">
+        <p class="eaar-block-title">{{ t("eaar.what_to_do") }}</p>
+        <div id="fabric-findings" class="findings-list">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Every node ---- -->
+  <section class="table-card">
+    <div class="card-header"><h3>{{ t("fabric.all_nodes") }}</h3></div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("devices.hostname") }}</th>
+            <th>{{ t("fabric.role") }}</th>
+            <th>{{ t("devices.system_ip") }}</th>
+            <th>{{ t("devices.site") }}</th>
+            <th>{{ t("devices.version") }}</th>
+            <th>{{ t("devices.status") }}</th>
+          </tr>
+        </thead>
+        <tbody id="fabric-node-tbody">
+          <tr><td colspan="6" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="table-card">
+    <div class="card-header">
+      <h3>{{ t("compat.sources") }}</h3>
+      <span class="tunnel-summary" id="compat-caps">—</span>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("compat.endpoint") }}</th>
+            <th>{{ t("compat.feeds") }}</th>
+            <th>{{ t("compat.evidence") }}</th>
+            <th>{{ t("compat.this_controller") }}</th>
+          </tr>
+        </thead>
+        <tbody id="compat-tbody">
+          <tr><td colspan="4" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/compat.js') }}"></script>
+{% endblock %}

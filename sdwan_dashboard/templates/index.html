@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <!-- ---- Overall fabric health ---- -->
+  <section class="health-hero" id="health-hero">
+    <div class="health-gauge-wrap">
+      <canvas id="chartHealthScore"></canvas>
+      <div class="health-score-overlay">
+        <span id="health-score-value">—</span>
+        <span class="health-score-max">/100</span>
+      </div>
+    </div>
+    <div class="health-hero-body">
+      <p class="health-label">{{ t("health.overall") }}</p>
+      <p class="health-grade" id="health-grade">{{ t("common.loading") }}</p>
+      <div class="health-bars" id="health-bars"></div>
+    </div>
+    <div class="health-findings">
+      <p class="health-label">{{ t("health.top_issues") }}</p>
+      <div id="health-findings-list" class="findings-list">
+        <p class="loading-cell">{{ t("common.loading") }}</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Summary KPI Cards ---- -->
+  <section class="kpi-grid">
+
+    <div class="kpi-card" id="card-devices">
+      <div class="kpi-icon icon-devices">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+      </div>
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("kpi.total_devices") }}</p>
+        <p class="kpi-value" id="kpi-total">—</p>
+        <p class="kpi-sub">
+          <span class="dot-green"></span><span id="kpi-reachable">—</span> {{ t("kpi.reachable") }} &nbsp;
+          <span class="dot-red"></span><span id="kpi-unreachable">—</span> {{ t("kpi.unreachable") }}
+        </p>
+      </div>
+    </div>
+
+    <div class="kpi-card" id="card-bfd">
+      <div class="kpi-icon icon-bfd">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+      </div>
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("kpi.bfd_sessions") }}</p>
+        <p class="kpi-value" id="kpi-bfd-up">—</p>
+        <p class="kpi-sub">
+          <span class="dot-green"></span><span id="kpi-bfd-up-lbl">—</span> {{ t("common.up") }} &nbsp;
+          <span class="dot-red"></span><span id="kpi-bfd-down">—</span> {{ t("common.down") }}
+        </p>
+      </div>
+    </div>
+
+    <div class="kpi-card" id="card-omp">
+      <div class="kpi-icon icon-omp">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>
+      </div>
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("kpi.omp_peers") }}</p>
+        <p class="kpi-value" id="kpi-omp">—</p>
+        <p class="kpi-sub">
+          <span class="dot-green"></span><span id="kpi-omp-up">—</span> / <span id="kpi-omp-total">—</span> {{ t("kpi.devices_healthy") }}
+        </p>
+      </div>
+    </div>
+
+    <div class="kpi-card kpi-alarms" id="card-alarms">
+      <div class="kpi-icon icon-alarms">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
+      </div>
+      <div class="kpi-body">
+        <p class="kpi-label">{{ t("kpi.active_alarms") }}</p>
+        <p class="kpi-value alarms-val">
+          <span id="kpi-critical" class="alarm-crit">—</span>
+          <span id="kpi-major"    class="alarm-major">—</span>
+          <span id="kpi-minor"    class="alarm-minor">—</span>
+        </p>
+        <p class="kpi-sub">
+          <span class="dot-red"></span>{{ t("kpi.crit") }} &nbsp;
+          <span class="dot-orange"></span>{{ t("kpi.major") }} &nbsp;
+          <span class="dot-yellow"></span>{{ t("kpi.minor") }}
+        </p>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ---- Charts Row ---- -->
+  <section class="charts-row">
+    <div class="chart-card">
+      <h3 class="chart-title">{{ t("chart.reachability") }}</h3>
+      <div class="chart-wrap chart-wrap-sm">
+        <canvas id="chartReachability"></canvas>
+      </div>
+    </div>
+    <div class="chart-card">
+      <h3 class="chart-title">{{ t("chart.bfd_health") }}</h3>
+      <div class="chart-wrap chart-wrap-sm">
+        <canvas id="chartBfd"></canvas>
+      </div>
+    </div>
+    <div class="chart-card chart-card-wide">
+      <h3 class="chart-title">{{ t("chart.throughput") }}</h3>
+      <div class="chart-wrap">
+        <canvas id="chartThroughput"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Health trend over time ---- -->
+  <section class="chart-card">
+    <div class="card-header-inline">
+      <h3 class="chart-title">{{ t("chart.trend") }}</h3>
+      <div class="range-picker" id="range-picker">
+        <button class="range-btn active" data-hours="1">{{ t("range.1h") }}</button>
+        <button class="range-btn" data-hours="6">{{ t("range.6h") }}</button>
+        <button class="range-btn" data-hours="24">{{ t("range.24h") }}</button>
+        <button class="range-btn" data-hours="168">{{ t("range.7d") }}</button>
+      </div>
+    </div>
+    <div class="chart-wrap chart-wrap-trend">
+      <canvas id="chartTrend"></canvas>
+    </div>
+    <p id="trend-empty" class="trend-empty" hidden>
+      {{ t("chart.trend_empty") }}
+    </p>
+  </section>
+
+  <!-- ---- Device Table + Control Plane ---- -->
+  <section class="bottom-row">
+
+    <div class="table-card">
+      <div class="card-header">
+        <h3>{{ t("devices.title") }}</h3>
+        <div class="card-header-actions">
+          <input id="device-search" class="search-box" type="text" placeholder="{{ t('devices.search') }}" />
+          <a href="/api/export/devices.csv" class="btn-export" download>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            {{ t("devices.export") }}
+          </a>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table" id="device-table">
+          <thead>
+            <tr>
+              <th>{{ t("devices.hostname") }}</th>
+              <th>{{ t("devices.system_ip") }}</th>
+              <th>{{ t("devices.type") }}</th>
+              <th>{{ t("devices.model") }}</th>
+              <th>{{ t("devices.version") }}</th>
+              <th>{{ t("devices.site") }}</th>
+              <th>{{ t("devices.status") }}</th>
+              <th>{{ t("devices.cpu") }}</th>
+              <th>{{ t("devices.memory") }}</th>
+            </tr>
+          </thead>
+          <tbody id="device-tbody">
+            <tr><td colspan="9" class="loading-cell">{{ t("common.loading") }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="side-panel">
+
+      <!-- Control Plane -->
+      <div class="panel-card">
+        <h3 class="panel-title">{{ t("control.title") }}</h3>
+        <div id="control-list" class="control-list">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+      </div>
+
+      <!-- Alarms Feed -->
+      <div class="panel-card panel-card-grow">
+        <h3 class="panel-title">{{ t("alarms.title") }}</h3>
+        <div id="alarms-feed" class="alarms-feed">
+          <p class="loading-cell">{{ t("common.loading") }}</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ---- IPsec / TLOC tunnels ---- -->
+  <section class="table-card">
+    <div class="card-header">
+      <h3>{{ t("tunnels.title") }}</h3>
+      <span id="tunnel-summary" class="tunnel-summary">—</span>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t("tunnels.source") }}</th>
+            <th>{{ t("tunnels.local_color") }}</th>
+            <th>{{ t("tunnels.remote") }}</th>
+            <th>{{ t("tunnels.remote_color") }}</th>
+            <th>{{ t("tunnels.state") }}</th>
+            <th>{{ t("tunnels.latency") }}</th>
+            <th>{{ t("tunnels.loss") }}</th>
+            <th>{{ t("tunnels.jitter") }}</th>
+          </tr>
+        </thead>
+        <tbody id="tunnel-tbody">
+          <tr><td colspan="8" class="loading-cell">{{ t("common.loading") }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block extra_body %}
+<!-- ===== DEVICE DRILL-DOWN MODAL ===== -->
+<div id="device-modal" class="modal-backdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-header">
+      <div>
+        <h2 id="modal-title" class="modal-title">—</h2>
+        <p id="modal-subtitle" class="modal-subtitle">—</p>
+      </div>
+      <button id="modal-close" class="modal-close" aria-label="{{ t('common.close') }}">&times;</button>
+    </div>
+    <div id="modal-body" class="modal-body">
+      <p class="loading-cell">{{ t("common.loading") }}</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}
