@@ -4,7 +4,7 @@ A single-page operations dashboard that answers one question at a glance: **is t
 
 A background poller pulls live state from the vManage REST API — device reachability, BFD and OMP sessions, IPsec tunnels, control-plane status, WAN throughput and alarms — scores it, stores it, and can notify you when it degrades.
 
-![Dashboard](docs/dashboard.png)
+![Overview](docs/overview.png)
 
 ---
 
@@ -56,6 +56,16 @@ SDWAN_MODE=live VMANAGE_HOST=… docker compose up --build   # live
 **Device drill-down** — click any row in the inventory for that device's interfaces, IPsec tunnels, control connections, OMP routes and its own alarms.
 
 ![Device detail](docs/device-detail.png)
+
+### The specialised views
+
+![QoS](docs/qos.png)
+
+![Link utilisation](docs/links.png)
+
+![Application-aware routing](docs/aar.png)
+
+![vManage compatibility](docs/compat.png)
 
 Alongside those: KPI cards, reachability and BFD doughnuts, a WAN throughput chart, a searchable device inventory with CPU/memory bars, control-plane status and a severity-coloured alarm feed.
 
