@@ -115,7 +115,9 @@ function bitrate(kbps) {
 
 // ---------------------------------------------------------------- fetching
 async function fetchJSON(url) {
-  const res = await fetch(url);
+  // Prefix here rather than at each call site: every panel goes through this,
+  // so a mount point is applied once instead of being forgotten somewhere.
+  const res = await fetch(url.startsWith("/") ? BASE + url : url);
   if (!res.ok) {
     // The API reports SD-WAN failures as {error, message}; surface that text
     // rather than a bare status code so the operator knows what to fix.

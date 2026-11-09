@@ -135,3 +135,15 @@ CSP_ENABLED = _flag("CSP_ENABLED", "true")
 # blank page with nothing in the console that names the cause, so a dashboard
 # that cannot be embedded looks broken rather than protected.
 FRAME_ANCESTORS = os.getenv("FRAME_ANCESTORS", "'none'").strip() or "'none'"
+
+# ---- Serving under a path prefix -------------------------------------------
+# The dashboard emits absolute URLs from the root (/static/..., /api/...).
+# Behind a reverse proxy that mounts it on a subpath — nginx at /sdwan/, an
+# internal portal, a preview pane — those point outside the mount and every
+# asset 404s, leaving an unstyled skeleton rather than an error anyone can read.
+#
+# Set APPLICATION_ROOT to the mount point ("/sdwan"), or leave it empty and let
+# the proxy send X-Forwarded-Prefix, which is honoured only when
+# TRUST_PROXY_HEADERS says the proxy is one you control: a client could
+# otherwise set it and move every link.
+APPLICATION_ROOT = os.getenv("APPLICATION_ROOT", "").rstrip("/")

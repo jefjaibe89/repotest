@@ -44,7 +44,33 @@ logging.basicConfig(
 )
 log = logging.getLogger("sdwan-dashboard")
 
+class PrefixMiddleware:
+    """Mount the app under a path prefix so its URLs stay inside it.
+
+    WSGI already has the mechanism: SCRIPT_NAME is the mount point and Flask
+    builds every url_for on top of it. The prefix comes from configuration,
+    or from the proxy's X-Forwarded-Prefix when that proxy is trusted.
+    """
+
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        prefix = config.APPLICATION_ROOT
+        if not prefix and config.TRUST_PROXY_HEADERS:
+            prefix = (environ.get("HTTP_X_FORWARDED_PREFIX") or "").rstrip("/")
+
+        if prefix:
+            environ["SCRIPT_NAME"] = prefix
+            path = environ.get("PATH_INFO", "")
+            if path.startswith(prefix):
+                environ["PATH_INFO"] = path[len(prefix):] or "/"
+
+        return self.wsgi_app(environ, start_response)
+
+
 app = Flask(__name__)
+app.wsgi_app = PrefixMiddleware(app.wsgi_app)
 app.secret_key = config.SECRET_KEY
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,

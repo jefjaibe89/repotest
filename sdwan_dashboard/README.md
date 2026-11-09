@@ -159,6 +159,7 @@ All settings are environment variables; see `.env.example` for the full list.
 | `METRICS_TOKEN` | — | Bearer token required to scrape, when set |
 | `CSP_ENABLED` | `true` | Content Security Policy header |
 | `FRAME_ANCESTORS` | `'none'` | Who may embed the dashboard in a frame |
+| `APPLICATION_ROOT` | — | Mount point when served on a subpath behind a proxy |
 
 ---
 

@@ -94,6 +94,9 @@
   // rather than being fetched — the dashboard has to work without egress.
   const I18N = {{ catalog|safe }};
   const LOCALE = {{ locale|tojson }};
+  // Where the app is mounted. Empty at the root; a prefix behind a proxy that
+  // serves it on a subpath, so the panels fetch from inside the mount.
+  const BASE = {{ request.script_root|tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/common.js') }}"></script>
 {% block scripts %}{% endblock %}

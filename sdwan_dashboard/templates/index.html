@@ -137,7 +137,7 @@
         <h3>{{ t("devices.title") }}</h3>
         <div class="card-header-actions">
           <input id="device-search" class="search-box" type="text" placeholder="{{ t('devices.search') }}" />
-          <a href="/api/export/devices.csv" class="btn-export" download>
+          <a href="{{ url_for('export_devices_csv') }}" class="btn-export" download>
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
             {{ t("devices.export") }}
           </a>
