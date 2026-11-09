@@ -18,6 +18,9 @@ pip install -r requirements.txt
 python app.py
 ```
 
+Needs **Python 3.10 or newer**. macOS ships 3.9 as `python3`, so there use a
+newer one directly (`brew install python@3.12`, then `python3.12 app.py`).
+
 Open <http://localhost:5000>.
 
 ### Connecting to a real controller

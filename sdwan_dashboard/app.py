@@ -5,6 +5,24 @@ Web requests never touch vManage: a background poller collects the fabric on a
 fixed cadence and writes it to the store, and every route serves from there.
 """
 
+# Checked before anything else is imported. The codebase uses `X | None`
+# annotations, which 3.9 parses but raises TypeError on when evaluated — so
+# without this the app dies inside whichever module happens to be imported
+# first, with a message that names neither Python nor the version needed.
+# macOS still ships 3.9 as `python3`, which is how this is normally met.
+import sys
+
+if sys.version_info < (3, 10):
+    sys.stderr.write(
+        "\nThis dashboard needs Python 3.10 or newer; you are running "
+        f"{sys.version.split()[0]}.\n\n"
+        "macOS ships 3.9 as `python3`. Install a newer one and use it directly:\n"
+        "    brew install python@3.12\n"
+        "    python3.12 -m pip install -r requirements.txt\n"
+        "    python3.12 app.py\n\n"
+    )
+    raise SystemExit(1)
+
 import csv
 import io
 import json
