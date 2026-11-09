@@ -180,7 +180,12 @@ def _inject_nonce():
 def _security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "same-origin")
-    response.headers.setdefault("X-Frame-Options", "DENY")
+
+    # X-Frame-Options only understands DENY and SAMEORIGIN, so it cannot
+    # express an allowlist and would override a CSP that does. Send it only
+    # while framing is refused outright; otherwise frame-ancestors decides.
+    if config.FRAME_ANCESTORS == "'none'":
+        response.headers.setdefault("X-Frame-Options", "DENY")
 
     if not config.CSP_ENABLED:
         return response
@@ -199,7 +204,7 @@ def _security_headers(response):
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
-        "frame-ancestors 'none'",
+        f"frame-ancestors {config.FRAME_ANCESTORS}",
     ]))
     return response
 

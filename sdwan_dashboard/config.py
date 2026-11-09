@@ -121,3 +121,17 @@ METRICS_TOKEN = os.getenv("METRICS_TOKEN", "")
 # Defence in depth under the output escaping: if a future view introduces an
 # unescaped sink, this is what stops the injected script from running.
 CSP_ENABLED = _flag("CSP_ENABLED", "true")
+
+# Who may embed this dashboard in a frame. "'none'" (the default) refuses
+# every embedder, which is right for a NOC tool: clickjacking a page that
+# drives network operations is worth preventing.
+#
+# Set it to allow a deliberate embedder — a preview pane, an internal portal,
+# a Grafana panel. Takes CSP frame-ancestors syntax: "'self'", one or more
+# origins ("https://portal.example.com"), or "*" for any, which is a
+# development setting and not one to deploy.
+#
+# Note the failure mode this exists for: a browser refusing a frame renders a
+# blank page with nothing in the console that names the cause, so a dashboard
+# that cannot be embedded looks broken rather than protected.
+FRAME_ANCESTORS = os.getenv("FRAME_ANCESTORS", "'none'").strip() or "'none'"

@@ -158,6 +158,7 @@ All settings are environment variables; see `.env.example` for the full list.
 | `METRICS_ENABLED` | `false` | Serve `/metrics` for Prometheus |
 | `METRICS_TOKEN` | — | Bearer token required to scrape, when set |
 | `CSP_ENABLED` | `true` | Content Security Policy header |
+| `FRAME_ANCESTORS` | `'none'` | Who may embed the dashboard in a frame |
 
 ---
 

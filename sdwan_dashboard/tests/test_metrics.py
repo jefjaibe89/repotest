@@ -219,3 +219,48 @@ def test_other_security_headers(client, header, value):
 def test_csp_can_be_turned_off_for_debugging(client, monkeypatch):
     monkeypatch.setattr(config, "CSP_ENABLED", False)
     assert "Content-Security-Policy" not in client.get("/").headers
+
+
+# ------------------------------------------------------- frame embedding
+# A browser that refuses a frame renders a blank page with nothing in the
+# console naming the cause, so a dashboard that cannot be embedded looks
+# broken rather than protected. Refusing is still the default; these pin down
+# that there is a way out and that the two headers never disagree.
+def test_framing_is_refused_by_default(client):
+    resp = client.get("/")
+    assert resp.headers["X-Frame-Options"] == "DENY"
+    assert "frame-ancestors 'none'" in resp.headers["Content-Security-Policy"]
+
+
+@pytest.mark.parametrize("value", ["'self'", "https://portal.example.com", "*"])
+def test_a_configured_embedder_reaches_the_policy(client, monkeypatch, value):
+    monkeypatch.setattr(config, "FRAME_ANCESTORS", value)
+    csp = client.get("/").headers["Content-Security-Policy"]
+    assert f"frame-ancestors {value}" in csp
+
+
+@pytest.mark.parametrize("value", ["'self'", "https://portal.example.com", "*"])
+def test_x_frame_options_is_dropped_once_framing_is_allowed(client, monkeypatch, value):
+    """It only understands DENY and SAMEORIGIN, so it cannot express an
+    allowlist and would override the CSP directive that can."""
+    monkeypatch.setattr(config, "FRAME_ANCESTORS", value)
+    assert "X-Frame-Options" not in client.get("/").headers
+
+
+def test_the_two_headers_never_disagree(client, monkeypatch):
+    for value in ("'none'", "'self'", "*"):
+        monkeypatch.setattr(config, "FRAME_ANCESTORS", value)
+        resp = client.get("/")
+        denies_via_xfo = resp.headers.get("X-Frame-Options") == "DENY"
+        denies_via_csp = "frame-ancestors 'none'" in resp.headers["Content-Security-Policy"]
+        assert denies_via_xfo == denies_via_csp, f"headers disagree at {value}"
+
+
+def test_an_empty_setting_falls_back_to_refusing(monkeypatch):
+    """A blank environment variable must not become an empty directive."""
+    import importlib
+
+    monkeypatch.setenv("FRAME_ANCESTORS", "   ")
+    assert importlib.reload(config).FRAME_ANCESTORS == "'none'"
+    monkeypatch.delenv("FRAME_ANCESTORS")
+    importlib.reload(config)
