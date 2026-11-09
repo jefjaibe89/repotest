@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+.env
+
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime state
+*.db
+*.db-wal
+*.db-shm
+*.lock
+
+node_modules/
+*.tgz
+
+.DS_Store
+*.swp
+.idea/
+.vscode/
